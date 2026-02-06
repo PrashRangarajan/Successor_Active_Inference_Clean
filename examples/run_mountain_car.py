@@ -87,6 +87,14 @@ def run_mountain_car_example():
     print(f"Hierarchical: {result['steps']} steps, reached goal: {result['reached_goal']}")
     print(f"Flat: {result_flat['steps']} steps, reached goal: {result_flat['reached_goal']}")
 
+    # Visualize matrices (works for all environments)
+    print("\n" + "="*50)
+    print("VISUALIZATION")
+    print("="*50)
+
+    agent.view_matrices(save_dir="figures/mountain_car/matrices", learned=True)
+    print("  Saved matrix visualizations to figures/mountain_car/matrices/")
+
     # Record a video of the flat policy
     print("\n" + "="*50)
     print("RECORDING VIDEO")

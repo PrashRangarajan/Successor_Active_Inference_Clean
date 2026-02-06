@@ -114,6 +114,19 @@ def run_key_gridworld_example():
     agent.visualize_clusters(save_dir="figures/clustering/key")
     print("  Saved cluster visualizations to figures/clustering/key/")
 
+    # Visualize value function
+    agent.visualize_value_function(save_path="figures/key/value_function.png")
+    print("  Saved value function to figures/key/value_function.png")
+
+    # Run another episode and visualize trajectory
+    agent.reset_episode(init_state=init_loc + (0,))
+    agent.run_episode_flat(max_steps=100)
+
+    # Visualize actions taken
+    agent.show_actions(save_path="figures/key/Actions_taken.png",
+                       init_loc=init_loc, goal_loc=goal_loc)
+    print("  Saved action trajectory to figures/key/Actions_taken.png")
+
     # Visualize macro action policies
     agent.visualize_policy(save_dir="figures/Macro Action Network/key")
     print("  Saved policy visualizations to figures/Macro Action Network/key/")

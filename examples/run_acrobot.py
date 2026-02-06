@@ -122,12 +122,13 @@ def run_acrobot_example():
     print("VISUALIZATION")
     print("="*50)
 
-    os.makedirs("figures/matrices/acrobot", exist_ok=True)
-    os.makedirs("figures/clustering/acrobot", exist_ok=True)
     os.makedirs("figures/acrobot", exist_ok=True)
 
-    # Note: Matrix visualization for 4D state space is complex
-    # We can save the raw matrices for custom analysis
+    # Visualize transition and successor matrices (works for all environments)
+    agent.view_matrices(save_dir="figures/acrobot/matrices", learned=True)
+    print("  Saved matrix visualizations to figures/acrobot/matrices/")
+
+    # Also save raw matrices for custom analysis
     if agent.M is not None:
         np.save("figures/acrobot/M_acrobot.npy", agent.M)
         print("  Saved M matrix to figures/acrobot/M_acrobot.npy")

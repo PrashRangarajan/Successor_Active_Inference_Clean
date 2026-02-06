@@ -16,13 +16,77 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import sys
-from scipy import stats
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from unified_env import StandardGridworld as SR_Gridworld
 from environments.pomdp_gridworld import POMDPGridworldAdapter
 from core.hierarchical_agent import HierarchicalSRAgent
+
+
+def visualize_pomdp_episode_comparison(adapter, agent, grid_size):
+    """Compare hierarchical vs flat trajectories on the POMDP environment.
+
+    Shows true path (solid) vs believed path (dashed) overlaid on the
+    observation entropy heatmap for both hierarchical and flat episodes.
+
+    Args:
+        adapter: POMDP adapter with episode history
+        agent: Agent (used for accessing goal_states)
+        grid_size: Size of the grid
+    """
+    os.makedirs("figures/pomdp", exist_ok=True)
+
+    true_states = adapter.state_history
+    beliefs = adapter.belief_history
+
+    if not true_states or len(true_states) < 2:
+        print("No episode history to compare")
+        return
+
+    entropy_vals = adapter.get_observation_entropy()
+    entropy_grid = entropy_vals.reshape(grid_size, grid_size).T
+
+    # Convert indices to (x, y) coordinates
+    true_locs = [adapter.render_state(s) for s in true_states]
+    belief_locs = [adapter.render_state(b) for b in beliefs]
+
+    true_x = [loc[0] for loc in true_locs]
+    true_y = [loc[1] for loc in true_locs]
+    belief_x = [loc[0] for loc in belief_locs]
+    belief_y = [loc[1] for loc in belief_locs]
+
+    fig, ax = plt.subplots(figsize=(9, 8))
+    ax.imshow(entropy_grid, cmap='YlOrRd', interpolation='nearest', alpha=0.6)
+
+    # True trajectory
+    ax.plot(true_x, true_y, 'b-o', linewidth=2, markersize=3,
+            alpha=0.8, label='True Path', zorder=4)
+    # Believed trajectory
+    ax.plot(belief_x, belief_y, 'r--s', linewidth=1.5, markersize=3,
+            alpha=0.7, label='Believed Path', zorder=3)
+
+    # Mark start and goal
+    ax.scatter(true_x[0], true_y[0], color='blue', s=200, marker='o',
+              zorder=5, edgecolors='white', linewidths=2, label='Start')
+    if agent.goal_states:
+        goal_loc = adapter.state_space.index_to_state(agent.goal_states[0])
+        ax.scatter(goal_loc[0], goal_loc[1], color='lime', s=300, marker='*',
+                  zorder=5, edgecolors='black', linewidths=1.5, label='Goal')
+
+    ax.set_xticks(np.arange(grid_size))
+    ax.set_yticks(np.arange(grid_size))
+    ax.set_xticks(np.arange(-0.5, grid_size, 1), minor=True)
+    ax.set_yticks(np.arange(-0.5, grid_size, 1), minor=True)
+    ax.grid(which='minor', color='gray', linestyle='-', linewidth=0.5, alpha=0.5)
+    ax.tick_params(which='minor', bottom=False, left=False)
+    ax.set_title("POMDP Episode: True vs Believed Trajectory", fontsize=15)
+    ax.legend(loc='upper right', fontsize=10)
+
+    plt.tight_layout()
+    plt.savefig("figures/pomdp/episode_trajectory_comparison.png", bbox_inches='tight')
+    plt.close()
+    print("Episode trajectory comparison saved to figures/pomdp/episode_trajectory_comparison.png")
 
 
 def run_pomdp_gridworld_example():
@@ -125,8 +189,21 @@ def run_pomdp_gridworld_example():
     # Use agent's built-in learning (handles SR, clustering, adjacency)
     agent.learn_environment(num_episodes=n_episodes)
 
-    # ==================== Visualize Learning ====================
-    visualize_pomdp_learning(adapter, agent, grid_size)
+    # ==================== Visualize POMDP Environment & Learning ====================
+    print("\n" + "=" * 50)
+    print("VISUALIZATIONS")
+    print("=" * 50)
+
+    # POMDP environment visualizations
+    agent.visualize_observation_entropy()
+    agent.visualize_observation_model()
+    agent.visualize_noise_zones(init_loc=init_loc, goal_loc=goal_loc)
+    agent.visualize_pomdp_value_comparison(beta=beta)
+
+    # Standard agent visualizations
+    agent.visualize_clusters(save_dir="figures/pomdp/clustering")
+    agent.visualize_value_function(save_path="figures/pomdp/value_function.png")
+    agent.view_matrices(save_dir="figures/pomdp/matrices")
 
     # ==================== Test Phase ====================
     print("\n" + "=" * 50)
@@ -148,6 +225,12 @@ def run_pomdp_gridworld_example():
     print(f"  Actually reached goal: {true_reached_goal}")
     print(f"  Believed final state: {result['final_state']}")
     print(f"  True final state: {adapter.get_true_state()}")
+
+    # Visualize belief trajectory for hierarchical episode
+    agent.visualize_belief_trajectory()
+
+    # Visualize episode trajectory comparison
+    visualize_pomdp_episode_comparison(adapter, agent, grid_size)
 
     # Compare with flat policy
     print("\n" + "=" * 50)
@@ -194,7 +277,7 @@ def run_pomdp_gridworld_example():
         true_loc = adapter.render_state(true_states[i])
         obs_loc = adapter.render_state(observations[i])
         belief_loc = adapter.render_state(belief_states[i])
-        match = "✓" if true_states[i] == belief_states[i] else "✗"
+        match = "Y" if true_states[i] == belief_states[i] else "N"
         print(f"{i:>4} | {str(true_loc):>12} | {str(obs_loc):>12} | {str(belief_loc):>12} | {match:>6}")
 
     # Count belief errors
@@ -204,49 +287,6 @@ def run_pomdp_gridworld_example():
     print(f"Note: Errors occur due to noisy observations - this is expected in a POMDP!")
 
     return agent, adapter
-
-
-def visualize_pomdp_learning(adapter, agent, grid_size):
-    """Visualize POMDP-specific learning results."""
-    os.makedirs("figures/pomdp", exist_ok=True)
-
-    # 1. Observation model entropy
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-
-    # Observation entropy map
-    entropy_map = adapter.get_observation_entropy().reshape(grid_size, grid_size).T
-    im1 = axes[0].imshow(entropy_map, cmap='hot')
-    axes[0].set_title("Observation Entropy (Higher = Noisier)")
-    plt.colorbar(im1, ax=axes[0])
-
-    # Value function
-    V = agent.M @ agent.C
-    V_map = V.reshape(grid_size, grid_size).T
-    im2 = axes[1].imshow(V_map, cmap='coolwarm')
-    axes[1].set_title("Value Function")
-    plt.colorbar(im2, ax=axes[1])
-
-    plt.tight_layout()
-    plt.savefig("figures/pomdp/entropy_and_value.png")
-    plt.close()
-
-    # 2. Observation model visualization (for a few states)
-    fig, axes = plt.subplots(2, 2, figsize=(10, 10))
-    axes = axes.flatten()
-
-    states_to_show = [0, grid_size // 2, grid_size * (grid_size // 2) + grid_size // 2, grid_size * grid_size - 1]
-    for i, state_idx in enumerate(states_to_show):
-        obs_dist = adapter.A[:, state_idx].reshape(grid_size, grid_size).T
-        im = axes[i].imshow(obs_dist, cmap='Blues')
-        state_loc = adapter.render_state(state_idx)
-        axes[i].set_title(f"P(obs | state={state_loc})")
-        plt.colorbar(im, ax=axes[i])
-
-    plt.tight_layout()
-    plt.savefig("figures/pomdp/observation_model.png")
-    plt.close()
-
-    print("Visualizations saved to figures/pomdp/")
 
 
 if __name__ == "__main__":
