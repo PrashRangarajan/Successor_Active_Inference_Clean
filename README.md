@@ -47,7 +47,7 @@ A modular Python framework for hierarchical active inference using successor rep
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/hierarchical-active-inference.git
+git clone https://github.com/PrashRangarajan/hierarchical-active-inference.git
 cd hierarchical-active-inference
 
 # Install dependencies
