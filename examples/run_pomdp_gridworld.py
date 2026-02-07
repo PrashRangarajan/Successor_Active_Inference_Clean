@@ -100,16 +100,34 @@ def run_pomdp_gridworld_example():
     grid_size = 9
     n_clusters = 5
 
-    # Use simpler setup: no walls, just some noisy states
-    walls = []  # No walls for simplicity
+    # 4-rooms layout: vertical and horizontal walls with doorways
+    mid = grid_size // 2  # 4
 
-    # Noisy states in the middle of the grid
+    # Vertical wall (x=mid for all y, except doorways)
+    vertical_door_y = [1, 7]
+    vertical_wall = [(mid, y) for y in range(grid_size) if y not in vertical_door_y]
+
+    # Horizontal wall (y=mid for all x, except doorways)
+    horizontal_door_x = [1, 7]
+    horizontal_wall = [(x, mid) for x in range(grid_size) if x not in horizontal_door_x]
+
+    walls = vertical_wall + horizontal_wall
+
+    # Noisy states: top-right room is heavily noisy
+    # Agent starts at (0,0), goal at (8,8). Direct route goes through top-right room.
+    # With high noise there, the EFE-aware agent should prefer the longer
+    # route through the bottom-left room (clean path).
+    #
+    # Room layout:
+    #   Top-left (0-3, 0-3):     Agent start - CLEAN
+    #   Top-right (5-8, 0-3):    Direct route - NOISY
+    #   Bottom-left (0-3, 5-8):  Alternative  - CLEAN
+    #   Bottom-right (5-8, 5-8): Goal         - CLEAN
     hallway_states = [
-        (4, 4),  # center
-        (3, 4),
-        (5, 4),
-        (4, 3),
-        (4, 5),
+        (x, y)
+        for x in range(mid + 1, grid_size)
+        for y in range(mid)
+        if (x, y) not in walls
     ]
 
     # Create environment
@@ -130,9 +148,9 @@ def run_pomdp_gridworld_example():
     adapter = POMDPGridworldAdapter(
         env,
         grid_size=grid_size,
-        noise_level=0.2,  # 20% noise: P(correct obs) = 0.8, demonstrates POMDP behavior
-        noisy_states=hallway_indices,  # Extra noise in hallways
-        noise_spread=3.0,  # How spread out the hallway noise is (gamma scale)
+        noise_level=0.3,  # 30% base noise — harder POMDP
+        noisy_states=hallway_indices,  # Extra noise in top-right room
+        noise_spread=3.0,  # Noisy room is 3x noisier than base
         use_true_state_for_learning=False  # Full POMDP mode
     )
 
@@ -152,7 +170,7 @@ def run_pomdp_gridworld_example():
     print(f"Goal state index: {goal_states}")
 
     # Create goal prior with information gain term
-    beta = 0.1  # Weight for observation entropy
+    beta = 1.0  # Weight for observation entropy — strong enough to reroute around noisy room
     C = adapter.create_goal_prior_with_info_gain(
         goal_states,
         reward=100.0,
@@ -226,6 +244,11 @@ def run_pomdp_gridworld_example():
     print(f"  Believed final state: {result['final_state']}")
     print(f"  True final state: {adapter.get_true_state()}")
 
+    # Generate video of hierarchical episode trajectory
+    agent.show_video(save_path="figures/pomdp_gridworld/episode_video_hier.mp4",
+                     init_loc=init_loc, goal_loc=goal_loc)
+    print("  Saved video to figures/pomdp_gridworld/episode_video_hier.mp4")
+
     # Visualize belief trajectory for hierarchical episode
     agent.visualize_belief_trajectory()
 
@@ -284,7 +307,7 @@ def run_pomdp_gridworld_example():
     n_errors = sum(1 for t, b in zip(true_states, belief_states) if t != b)
     print(f"\nBelief accuracy: {len(true_states) - n_errors}/{len(true_states)} " +
           f"({100 * (len(true_states) - n_errors) / len(true_states):.1f}%)")
-    print(f"Note: Errors occur due to noisy observations - this is expected in a POMDP!")
+    # print(f"Note: Errors occur due to noisy observations - this is expected in a POMDP!")
 
     return agent, adapter
 

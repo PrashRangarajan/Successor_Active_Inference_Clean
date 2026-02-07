@@ -214,34 +214,19 @@ class POMDPGridworldAdapter(BaseEnvironmentAdapter):
 
     # ==================== Belief Operations ====================
 
-    def _sample_belief_idx(self, belief: np.ndarray) -> int:
-        """Sample state index from belief distribution.
-
-        Uses mode (most frequent from multiple samples) to avoid
-        spurious estimates in high-entropy beliefs.
-        """
-        # Sample multiple times and take mode
-        samples = [np.random.choice(len(belief), p=belief) for _ in range(3)]
-        # Return mode
-        return max(set(samples), key=samples.count)
-
     def _belief_to_idx(self, belief: np.ndarray) -> int:
-        """Convert belief to most likely state index.
+        """Convert belief to most likely state index (MAP estimate).
 
-        Excludes walls from consideration.
+        Uses argmax of belief, excluding wall states.
         """
-        walls = self.get_wall_indices()
+        walls = set(self.get_wall_indices())
 
-        # Sample from belief
-        idx = self._sample_belief_idx(belief)
+        # Mask wall states so they can't be selected
+        masked = belief.copy()
+        for w in walls:
+            masked[w] = -1.0
 
-        # Extra insurance: don't believe we're in a wall
-        attempts = 0
-        while idx in walls and attempts < 10:
-            idx = self._sample_belief_idx(belief)
-            attempts += 1
-
-        return idx
+        return int(np.argmax(masked))
 
     def update_belief(self, observation_idx: int, action: int) -> np.ndarray:
         """Update belief given observation and previous action.

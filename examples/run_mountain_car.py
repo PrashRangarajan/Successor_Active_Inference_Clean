@@ -106,7 +106,7 @@ def run_mountain_car_example():
     frames = run_episode_with_video(agent, adapter, init_state, max_steps=500)
 
     if frames:
-        imageio.mimsave(video_path, frames, fps=30)
+        imageio.mimsave(video_path, frames, fps=30, macro_block_size=1)
         print(f"Video saved to: {video_path}")
     else:
         print("No frames captured")

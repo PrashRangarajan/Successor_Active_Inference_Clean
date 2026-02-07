@@ -124,10 +124,10 @@ def run_gridworld_example():
                        init_loc=init_loc, goal_loc=goal_loc)
     print("  Saved action trajectory to figures/gridworld/Actions_taken.png")
 
-    # Generate video (optional - can be slow)
-    # agent.show_video(save_path="videos/env_micro.mp4",
-    #                  init_loc=init_loc, goal_loc=goal_loc)
-    # print("  Saved video to videos/env_micro.mp4")
+    # Generate video of episode trajectory
+    agent.show_video(save_path="figures/gridworld/episode_video.mp4",
+                     init_loc=init_loc, goal_loc=goal_loc)
+    print("  Saved video to figures/gridworld/episode_video.mp4")
 
     # Visualize macro action policies
     agent.visualize_policy(save_dir="figures/gridworld/macro_action_network")

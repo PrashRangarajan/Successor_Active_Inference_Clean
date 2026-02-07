@@ -640,13 +640,29 @@ class HierarchicalSRAgent(VisualizationMixin):
 
     # ==================== Episode Execution ====================
 
+    def _get_planning_state(self) -> np.ndarray:
+        """Get a one-hot state vector for planning from the adapter's current state.
+
+        In MDP environments, the adapter already returns a one-hot vector.
+        In POMDP environments, the adapter returns a belief distribution (spread
+        over many states), which causes ``_select_micro_action`` to compute
+        blurry expected values and make poor action choices.  This method
+        converts the belief to a clean one-hot at the MAP estimate so the
+        micro-level planner can differentiate actions properly.
+        """
+        s_idx = self.adapter.get_current_state_index()
+        state = np.zeros(self.adapter.n_states)
+        state[s_idx] = 1.0
+        return state
+
     def reset_episode(self, init_state: Optional[Any] = None):
         """Reset for a new episode.
 
         Args:
             init_state: Optional initial state
         """
-        self.current_state = self.adapter.reset(init_state)
+        self.adapter.reset(init_state)
+        self.current_state = self._get_planning_state()
         self.state_history = [self.current_state.copy()]
         self.action_history = []
 
@@ -771,7 +787,8 @@ class HierarchicalSRAgent(VisualizationMixin):
                 break
 
             action = self._select_micro_action(V)
-            self.current_state = self.adapter.step(action)
+            self.adapter.step(action)
+            self.current_state = self._get_planning_state()
             self.state_history.append(self.current_state.copy())
             self.action_history.append(action)
 
@@ -809,7 +826,8 @@ class HierarchicalSRAgent(VisualizationMixin):
 
         while steps < max_steps and not self._is_at_goal():
             action = self._select_micro_action(V)
-            self.current_state = self.adapter.step(action)
+            self.adapter.step(action)
+            self.current_state = self._get_planning_state()
             self.state_history.append(self.current_state.copy())
             self.action_history.append(action)
 
@@ -884,7 +902,8 @@ class HierarchicalSRAgent(VisualizationMixin):
 
         while steps < max_steps and not self._is_at_goal():
             action = self._select_micro_action(V)
-            self.current_state = self.adapter.step(action)
+            self.adapter.step(action)
+            self.current_state = self._get_planning_state()
             self.state_history.append(self.current_state.copy())
             self.action_history.append(action)
 
@@ -1027,7 +1046,8 @@ class HierarchicalSRAgent(VisualizationMixin):
                     break
 
                 action = bn_policy.get(s_idx, 0)  # O(1) lookup
-                self.current_state = self.adapter.step(action)
+                self.adapter.step(action)
+                self.current_state = self._get_planning_state()
                 self.state_history.append(self.current_state.copy())
                 self.action_history.append(action)
                 total_steps += 1
@@ -1047,7 +1067,8 @@ class HierarchicalSRAgent(VisualizationMixin):
         while total_steps < max_steps and not self._is_at_goal():
             s_idx = self.adapter.get_current_state_index()
             action = self._goal_policy.get(s_idx, 0)  # O(1) lookup
-            self.current_state = self.adapter.step(action)
+            self.adapter.step(action)
+            self.current_state = self._get_planning_state()
             self.state_history.append(self.current_state.copy())
             self.action_history.append(action)
             total_steps += 1
@@ -1070,7 +1091,8 @@ class HierarchicalSRAgent(VisualizationMixin):
         while steps < max_steps and not self._is_at_goal():
             s_idx = self.adapter.get_current_state_index()
             action = self._goal_policy.get(s_idx, 0)  # O(1) lookup
-            self.current_state = self.adapter.step(action)
+            self.adapter.step(action)
+            self.current_state = self._get_planning_state()
             self.state_history.append(self.current_state.copy())
             self.action_history.append(action)
 
