@@ -107,29 +107,29 @@ def run_key_gridworld_example():
     print("="*50)
 
     # Visualize matrices
-    agent.view_matrices(save_dir="figures/matrices/key", learned=True)
-    print("  Saved matrix visualizations to figures/matrices/key/")
+    agent.view_matrices(save_dir="figures/key_gridworld/matrices", learned=True)
+    print("  Saved matrix visualizations to figures/key_gridworld/matrices/")
 
     # Visualize clusters (note: for augmented state space, this shows flattened view)
-    agent.visualize_clusters(save_dir="figures/clustering/key")
-    print("  Saved cluster visualizations to figures/clustering/key/")
+    agent.visualize_clusters(save_dir="figures/key_gridworld/clustering")
+    print("  Saved cluster visualizations to figures/key_gridworld/clustering/")
 
     # Visualize value function
-    agent.visualize_value_function(save_path="figures/key/value_function.png")
-    print("  Saved value function to figures/key/value_function.png")
+    agent.visualize_value_function(save_path="figures/key_gridworld/value_function.png")
+    print("  Saved value function to figures/key_gridworld/value_function.png")
 
     # Run another episode and visualize trajectory
     agent.reset_episode(init_state=init_loc + (0,))
     agent.run_episode_flat(max_steps=100)
 
     # Visualize actions taken
-    agent.show_actions(save_path="figures/key/Actions_taken.png",
+    agent.show_actions(save_path="figures/key_gridworld/Actions_taken.png",
                        init_loc=init_loc, goal_loc=goal_loc)
-    print("  Saved action trajectory to figures/key/Actions_taken.png")
+    print("  Saved action trajectory to figures/key_gridworld/Actions_taken.png")
 
     # Visualize macro action policies
-    agent.visualize_policy(save_dir="figures/Macro Action Network/key")
-    print("  Saved policy visualizations to figures/Macro Action Network/key/")
+    agent.visualize_policy(save_dir="figures/key_gridworld/macro_action_network")
+    print("  Saved policy visualizations to figures/key_gridworld/macro_action_network/")
 
 
 if __name__ == '__main__':

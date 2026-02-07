@@ -35,7 +35,7 @@ def visualize_pomdp_episode_comparison(adapter, agent, grid_size):
         agent: Agent (used for accessing goal_states)
         grid_size: Size of the grid
     """
-    os.makedirs("figures/pomdp", exist_ok=True)
+    os.makedirs("figures/pomdp_gridworld", exist_ok=True)
 
     true_states = adapter.state_history
     beliefs = adapter.belief_history
@@ -84,9 +84,9 @@ def visualize_pomdp_episode_comparison(adapter, agent, grid_size):
     ax.legend(loc='upper right', fontsize=10)
 
     plt.tight_layout()
-    plt.savefig("figures/pomdp/episode_trajectory_comparison.png", bbox_inches='tight')
+    plt.savefig("figures/pomdp_gridworld/episode_trajectory_comparison.png", bbox_inches='tight')
     plt.close()
-    print("Episode trajectory comparison saved to figures/pomdp/episode_trajectory_comparison.png")
+    print("Episode trajectory comparison saved to figures/pomdp_gridworld/episode_trajectory_comparison.png")
 
 
 def run_pomdp_gridworld_example():
@@ -201,9 +201,9 @@ def run_pomdp_gridworld_example():
     agent.visualize_pomdp_value_comparison(beta=beta)
 
     # Standard agent visualizations
-    agent.visualize_clusters(save_dir="figures/pomdp/clustering")
-    agent.visualize_value_function(save_path="figures/pomdp/value_function.png")
-    agent.view_matrices(save_dir="figures/pomdp/matrices")
+    agent.visualize_clusters(save_dir="figures/pomdp_gridworld/clustering")
+    agent.visualize_value_function(save_path="figures/pomdp_gridworld/value_function.png")
+    agent.view_matrices(save_dir="figures/pomdp_gridworld/matrices")
 
     # ==================== Test Phase ====================
     print("\n" + "=" * 50)
