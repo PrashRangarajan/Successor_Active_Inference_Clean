@@ -7,7 +7,7 @@ figures comparing:
   - Relative stability
   - Planning steps vs goal distance
 
-Saves .npy data files to data/ and figures to figures/eval/.
+Saves .npy data files to data/eval/gridworld/ and figures to figures/eval/gridworld/.
 
 Usage:
     # Run experiments (slow — 20 seeds × 15 checkpoints):
@@ -377,15 +377,18 @@ if __name__ == "__main__":
         episodes=eps,
     )
 
+    data_dir = "data/eval/gridworld"
+    save_dir = "figures/eval/gridworld"
+
     if args_cli.train:
-        os.makedirs("data/", exist_ok=True)
+        os.makedirs(data_dir, exist_ok=True)
 
         # Save args for later plotting
         args_save = vars(args).copy()
         args_save["walls"] = [list(w) for w in args_save["walls"]]
         args_save["init_loc"] = list(args_save["init_loc"])
         args_save["goal_loc"] = list(args_save["goal_loc"])
-        with open("data/args.json", "w") as f:
+        with open(os.path.join(data_dir, "args.json"), "w") as f:
             json.dump(args_save, f, indent=2)
 
         # Run main experiment
@@ -409,20 +412,20 @@ if __name__ == "__main__":
             for i in range(Q_rewards.shape[0])
         ])
 
-        # Save all data (filenames match legacy for backward compatibility)
-        np.save("data/SR_values_hierarchy.npy", SR_vals)
-        np.save("data/SR_values_flat.npy", SR_vals2)
-        np.save("data/SR_succ_hierarchy.npy", SR_succ)
-        np.save("data/SR_succ_flat.npy", SR_succ2)
-        np.save("data/SR_succ_macro.npy", SR_succ_macro)
-        np.save("data/SR_rewards_hierarchy.npy", SR_rewards)
-        np.save("data/SR_rewards_flat.npy", SR_rewards2)
-        np.save("data/SR_relative_stability_hierarchy.npy", SR_rel_stability_hierarchy)
-        np.save("data/SR_relative_stability_flat.npy", SR_rel_stability_flat)
-        np.save("data/Q_rewards.npy", Q_rewards)
-        np.save("data/Q_relative_stability.npy", Q_rel_stability)
+        # Save all data
+        np.save(os.path.join(data_dir, "SR_values_hierarchy.npy"), SR_vals)
+        np.save(os.path.join(data_dir, "SR_values_flat.npy"), SR_vals2)
+        np.save(os.path.join(data_dir, "SR_succ_hierarchy.npy"), SR_succ)
+        np.save(os.path.join(data_dir, "SR_succ_flat.npy"), SR_succ2)
+        np.save(os.path.join(data_dir, "SR_succ_macro.npy"), SR_succ_macro)
+        np.save(os.path.join(data_dir, "SR_rewards_hierarchy.npy"), SR_rewards)
+        np.save(os.path.join(data_dir, "SR_rewards_flat.npy"), SR_rewards2)
+        np.save(os.path.join(data_dir, "SR_relative_stability_hierarchy.npy"), SR_rel_stability_hierarchy)
+        np.save(os.path.join(data_dir, "SR_relative_stability_flat.npy"), SR_rel_stability_flat)
+        np.save(os.path.join(data_dir, "Q_rewards.npy"), Q_rewards)
+        np.save(os.path.join(data_dir, "Q_relative_stability.npy"), Q_rel_stability)
 
-        print("\nSaved all data to data/")
+        print(f"\nSaved all data to {data_dir}/")
 
         # Distance experiment (optional)
         if not args_cli.no_distances:
@@ -430,14 +433,15 @@ if __name__ == "__main__":
             print("DISTANCE EXPERIMENT")
             print("=" * 60)
             SR_dists, SR_dists2 = SR_distances(args, GOALS)
-            np.save("data/SR_dists_hierarchy.npy", SR_dists)
-            np.save("data/SR_dists_flat.npy", SR_dists2)
-            print("\nSaved distance data to data/")
+            np.save(os.path.join(data_dir, "SR_dists_hierarchy.npy"), SR_dists)
+            np.save(os.path.join(data_dir, "SR_dists_flat.npy"), SR_dists2)
+            print(f"\nSaved distance data to {data_dir}/")
 
     else:
         # Load saved args
-        if os.path.exists("data/args.json"):
-            with open("data/args.json", "r") as f:
+        args_path = os.path.join(data_dir, "args.json")
+        if os.path.exists(args_path):
+            with open(args_path, "r") as f:
                 saved = json.load(f)
                 # Convert lists back to tuples where needed
                 saved["walls"] = [tuple(w) for w in saved["walls"]]
@@ -460,13 +464,17 @@ if __name__ == "__main__":
         plot_SR_distances,
     )
 
-    os.makedirs("figures/eval", exist_ok=True)
+    os.makedirs(save_dir, exist_ok=True)
 
-    plot_SR_rewards(args)
-    plot_SR_values(args)
-    plot_relative_stability(args)
+    if os.path.exists(os.path.join(data_dir, "SR_rewards_hierarchy.npy")):
+        plot_SR_rewards(args, data_dir=data_dir, save_dir=save_dir)
 
-    if os.path.exists("data/SR_dists_hierarchy.npy"):
-        plot_SR_distances(args, GOALS)
+    if os.path.exists(os.path.join(data_dir, "SR_values_hierarchy.npy")):
+        plot_SR_values(args, data_dir=data_dir, save_dir=save_dir)
 
-    print("\nDone! Figures saved to figures/eval/")
+    plot_relative_stability(args, data_dir=data_dir, save_dir=save_dir)
+
+    if os.path.exists(os.path.join(data_dir, "SR_dists_hierarchy.npy")):
+        plot_SR_distances(args, GOALS, data_dir=data_dir, save_dir=save_dir)
+
+    print(f"\nDone! Figures saved to {save_dir}/")

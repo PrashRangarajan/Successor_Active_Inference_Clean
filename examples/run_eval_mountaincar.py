@@ -3,7 +3,7 @@
 Runs repeated experiments across training checkpoints to compare
 hierarchical vs flat active inference on the continuous Mountain Car environment.
 
-Saves .npy data files to data/mountaincar/ and figures to figures/eval_mountaincar/.
+Saves .npy data files to data/eval/mountaincar/ and figures to figures/eval/mountaincar/.
 
 Usage:
     # Run experiments:
@@ -180,13 +180,13 @@ def mountaincar_rewards_experiment(args):
 # ==================== Plotting ====================
 
 
-def plot_mountaincar_rewards(args, save_dir="figures/eval_mountaincar"):
+def plot_mountaincar_rewards(args, save_dir="figures/eval/mountaincar"):
     """Plot reward curves with confidence bands (Hierarchy vs Flat)."""
     os.makedirs(save_dir, exist_ok=True)
     eps_range = args.episodes
 
-    hier = np.load("data/mountaincar/SR_rewards_hierarchy.npy")[:, :len(eps_range)]
-    flat = np.load("data/mountaincar/SR_rewards_flat.npy")[:, :len(eps_range)]
+    hier = np.load("data/eval/mountaincar/SR_rewards_hierarchy.npy")[:, :len(eps_range)]
+    flat = np.load("data/eval/mountaincar/SR_rewards_flat.npy")[:, :len(eps_range)]
 
     mean_hier = np.mean(hier, axis=0)
     std_hier = np.std(hier, axis=0) / np.sqrt(len(hier))
@@ -210,13 +210,13 @@ def plot_mountaincar_rewards(args, save_dir="figures/eval_mountaincar"):
     print(f"  Saved {save_dir}/mountaincar_reward.png")
 
 
-def plot_mountaincar_steps(args, save_dir="figures/eval_mountaincar"):
+def plot_mountaincar_steps(args, save_dir="figures/eval/mountaincar"):
     """Plot steps-to-goal curves (Hierarchy vs Flat)."""
     os.makedirs(save_dir, exist_ok=True)
     eps_range = args.episodes
 
-    hier = np.load("data/mountaincar/SR_steps_hierarchy.npy")[:, :len(eps_range)]
-    flat = np.load("data/mountaincar/SR_steps_flat.npy")[:, :len(eps_range)]
+    hier = np.load("data/eval/mountaincar/SR_steps_hierarchy.npy")[:, :len(eps_range)]
+    flat = np.load("data/eval/mountaincar/SR_steps_flat.npy")[:, :len(eps_range)]
 
     mean_hier = np.mean(hier, axis=0)
     std_hier = np.std(hier, axis=0) / np.sqrt(len(hier))
@@ -240,12 +240,12 @@ def plot_mountaincar_steps(args, save_dir="figures/eval_mountaincar"):
     print(f"  Saved {save_dir}/mountaincar_steps.png")
 
 
-def plot_mountaincar_stability(args, save_dir="figures/eval_mountaincar"):
+def plot_mountaincar_stability(args, save_dir="figures/eval/mountaincar"):
     """Plot relative stability bar chart (Hierarchy vs Flat)."""
     os.makedirs(save_dir, exist_ok=True)
 
-    hier_path = "data/mountaincar/SR_relative_stability_hierarchy.npy"
-    flat_path = "data/mountaincar/SR_relative_stability_flat.npy"
+    hier_path = "data/eval/mountaincar/SR_relative_stability_hierarchy.npy"
+    flat_path = "data/eval/mountaincar/SR_relative_stability_flat.npy"
 
     labels, means, sems = [], [], []
 
@@ -316,10 +316,10 @@ if __name__ == "__main__":
     )
 
     if args_cli.train:
-        os.makedirs("data/mountaincar/", exist_ok=True)
+        os.makedirs("data/eval/mountaincar/", exist_ok=True)
 
         # Save args
-        with open("data/mountaincar/args.json", "w") as f:
+        with open("data/eval/mountaincar/args.json", "w") as f:
             json.dump(vars(args), f, indent=2)
 
         print("=" * 60)
@@ -345,18 +345,18 @@ if __name__ == "__main__":
         ])
 
         # Save data
-        np.save("data/mountaincar/SR_rewards_hierarchy.npy", SR_rewards_hier)
-        np.save("data/mountaincar/SR_rewards_flat.npy", SR_rewards_flat)
-        np.save("data/mountaincar/SR_steps_hierarchy.npy", SR_steps_hier)
-        np.save("data/mountaincar/SR_steps_flat.npy", SR_steps_flat)
-        np.save("data/mountaincar/SR_relative_stability_hierarchy.npy", SR_rel_stability_hier)
-        np.save("data/mountaincar/SR_relative_stability_flat.npy", SR_rel_stability_flat)
-        print("\nSaved all data to data/mountaincar/")
+        np.save("data/eval/mountaincar/SR_rewards_hierarchy.npy", SR_rewards_hier)
+        np.save("data/eval/mountaincar/SR_rewards_flat.npy", SR_rewards_flat)
+        np.save("data/eval/mountaincar/SR_steps_hierarchy.npy", SR_steps_hier)
+        np.save("data/eval/mountaincar/SR_steps_flat.npy", SR_steps_flat)
+        np.save("data/eval/mountaincar/SR_relative_stability_hierarchy.npy", SR_rel_stability_hier)
+        np.save("data/eval/mountaincar/SR_relative_stability_flat.npy", SR_rel_stability_flat)
+        print("\nSaved all data to data/eval/mountaincar/")
 
     else:
         # Load saved args
-        if os.path.exists("data/mountaincar/args.json"):
-            with open("data/mountaincar/args.json", "r") as f:
+        if os.path.exists("data/eval/mountaincar/args.json"):
+            with open("data/eval/mountaincar/args.json", "r") as f:
                 saved = json.load(f)
                 args = argparse.Namespace(**saved)
             print(f"Loaded args: {args}")
@@ -368,14 +368,14 @@ if __name__ == "__main__":
     print("GENERATING PLOTS")
     print("=" * 60)
 
-    os.makedirs("figures/eval_mountaincar", exist_ok=True)
+    os.makedirs("figures/eval/mountaincar", exist_ok=True)
 
-    if os.path.exists("data/mountaincar/SR_rewards_hierarchy.npy"):
+    if os.path.exists("data/eval/mountaincar/SR_rewards_hierarchy.npy"):
         plot_mountaincar_rewards(args)
 
-    if os.path.exists("data/mountaincar/SR_steps_hierarchy.npy"):
+    if os.path.exists("data/eval/mountaincar/SR_steps_hierarchy.npy"):
         plot_mountaincar_steps(args)
 
     plot_mountaincar_stability(args)
 
-    print("\nDone! Figures saved to figures/eval_mountaincar/")
+    print("\nDone! Figures saved to figures/eval/mountaincar/")

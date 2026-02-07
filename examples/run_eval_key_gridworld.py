@@ -1,19 +1,20 @@
-"""Evaluation: Acrobot benchmark comparing Hierarchy vs Flat.
+"""Evaluation: Key Gridworld benchmark comparing Hierarchy vs Flat.
 
 Runs repeated experiments across training checkpoints to compare
-hierarchical vs flat active inference on the continuous Acrobot environment.
+hierarchical vs flat active inference on the Key Gridworld environment.
+The agent must pick up a key before reaching the goal (augmented state space).
 
-Saves .npy data files to data/eval/acrobot/ and figures to figures/eval/acrobot/.
+Saves .npy data files to data/eval/key_gridworld/ and figures to figures/eval/key_gridworld/.
 
 Usage:
     # Run experiments:
-    python examples/run_eval_acrobot.py --train
+    python examples/run_eval_key_gridworld.py --train
 
     # Plot from saved data:
-    python examples/run_eval_acrobot.py
+    python examples/run_eval_key_gridworld.py
 
     # Quick test (2 seeds × 3 checkpoints):
-    python examples/run_eval_acrobot.py --train --quick
+    python examples/run_eval_key_gridworld.py --train --quick
 """
 
 import sys
@@ -30,13 +31,13 @@ import json
 import time
 
 import numpy as np
-import gymnasium as gym
 import matplotlib.pyplot as plt
 
 plt.style.use("seaborn-v0_8-poster")
 
 from core import HierarchicalSRAgent
-from environments.acrobot import AcrobotAdapter
+from environments.key_gridworld import KeyGridworldAdapter
+from unified_env import KeyGridworld as SR_Gridworld
 
 
 # ==================== Utilities ====================
@@ -65,25 +66,24 @@ def relative_stability_paper_style(returns, Ke=100, smooth_window=1, eps=1e-8):
 # ==================== Agent Factory ====================
 
 
-def create_acrobot_agent(n_theta_bins, n_dtheta_bins, n_clusters,
-                         num_episodes, gamma=0.99, learning_rate=0.05,
-                         use_replay=True, n_replay_epochs=10,
-                         test_max_steps=1000):
-    """Create a fresh Acrobot SR agent trained for exactly num_episodes.
+def create_key_gridworld_agent(grid_size, walls, key_loc, n_clusters,
+                                goal_spec, num_episodes, gamma=0.99,
+                                learning_rate=0.05, has_pickup_action=True,
+                                use_replay=True, n_replay_epochs=10):
+    """Create a fresh Key Gridworld SR agent trained for exactly num_episodes.
 
     Returns:
-        (agent, test_adapter) tuple
+        (agent, adapter) tuple
     """
-    # Training environment
-    env_train = gym.make('Acrobot-v1')
-    adapter_train = AcrobotAdapter(
-        env_train,
-        n_theta_bins=n_theta_bins,
-        n_dtheta_bins=n_dtheta_bins,
+    env = SR_Gridworld(grid_size, key_loc=key_loc, pickup=has_pickup_action)
+    env.set_walls(walls)
+
+    adapter = KeyGridworldAdapter(
+        env, grid_size, has_pickup_action=has_pickup_action,
     )
 
     agent = HierarchicalSRAgent(
-        adapter=adapter_train,
+        adapter=adapter,
         n_clusters=n_clusters,
         gamma=gamma,
         learning_rate=learning_rate,
@@ -91,25 +91,16 @@ def create_acrobot_agent(n_theta_bins, n_dtheta_bins, n_clusters,
         use_replay=use_replay,
         n_replay_epochs=n_replay_epochs,
     )
-    agent.set_goal(None, reward=100.0)
+    agent.set_goal(goal_spec, reward=100.0)
     agent.learn_environment(num_episodes)
 
-    # Switch to test environment with longer episode limit
-    env_test = gym.make('Acrobot-v1', max_episode_steps=test_max_steps)
-    adapter_test = AcrobotAdapter(
-        env_test,
-        n_theta_bins=n_theta_bins,
-        n_dtheta_bins=n_dtheta_bins,
-    )
-    agent.adapter = adapter_test
-
-    return agent, adapter_test
+    return agent, adapter
 
 
 # ==================== Experiment ====================
 
 
-def acrobot_rewards_experiment(args):
+def key_gridworld_rewards_experiment(args):
     """Main experiment: rewards across training checkpoints for Hierarchy vs Flat.
 
     Returns:
@@ -122,7 +113,7 @@ def acrobot_rewards_experiment(args):
     SR_steps_hier = np.zeros((args.n_runs, n_trials))
     SR_steps_flat = np.zeros((args.n_runs, n_trials))
 
-    init_state = [0.0, 0.0, 0.0, 0.0]
+    init_state = args.init_loc + (0,)  # Start without key
 
     for n in range(args.n_runs):
         print("x" * 40)
@@ -140,13 +131,13 @@ def acrobot_rewards_experiment(args):
             # Retry loop for rare LinAlgError during spectral clustering
             while True:
                 try:
-                    agent, adapter = create_acrobot_agent(
-                        args.n_theta_bins, args.n_dtheta_bins,
-                        args.n_clusters, num_episodes,
+                    agent, adapter = create_key_gridworld_agent(
+                        args.grid_size, args.walls, args.key_loc,
+                        args.n_clusters, args.goal_spec, num_episodes,
                         gamma=args.gamma,
+                        has_pickup_action=args.has_pickup_action,
                         use_replay=args.use_replay,
                         n_replay_epochs=args.n_replay_epochs,
-                        test_max_steps=args.test_max_steps,
                     )
                 except (np.linalg.LinAlgError, ValueError) as e:
                     print(f"  Error: {e} — retrying...")
@@ -180,13 +171,14 @@ def acrobot_rewards_experiment(args):
 # ==================== Plotting ====================
 
 
-def plot_acrobot_rewards(args, save_dir="figures/eval/acrobot"):
+def plot_key_gridworld_rewards(args, data_dir="data/eval/key_gridworld",
+                                save_dir="figures/eval/key_gridworld"):
     """Plot reward curves with confidence bands (Hierarchy vs Flat)."""
     os.makedirs(save_dir, exist_ok=True)
     eps_range = args.episodes
 
-    hier = np.load("data/eval/acrobot/SR_rewards_hierarchy.npy")[:, :len(eps_range)]
-    flat = np.load("data/eval/acrobot/SR_rewards_flat.npy")[:, :len(eps_range)]
+    hier = np.load(os.path.join(data_dir, "SR_rewards_hierarchy.npy"))[:, :len(eps_range)]
+    flat = np.load(os.path.join(data_dir, "SR_rewards_flat.npy"))[:, :len(eps_range)]
 
     mean_hier = np.mean(hier, axis=0)
     std_hier = np.std(hier, axis=0) / np.sqrt(len(hier))
@@ -201,22 +193,24 @@ def plot_acrobot_rewards(args, save_dir="figures/eval/acrobot"):
 
     plt.xlabel("Number of Training Episodes", fontsize=28)
     plt.ylabel("Total Reward", fontsize=28)
+    plt.title("Key Gridworld: Reward vs Training", fontsize=28)
     plt.legend(fontsize=26)
     plt.xticks(fontsize=26)
     plt.yticks(fontsize=26)
     plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, "acrobot_reward.png"), format="png")
+    plt.savefig(os.path.join(save_dir, "key_gridworld_reward.png"), format="png")
     plt.close()
-    print(f"  Saved {save_dir}/acrobot_reward.png")
+    print(f"  Saved {save_dir}/key_gridworld_reward.png")
 
 
-def plot_acrobot_steps(args, save_dir="figures/eval/acrobot"):
+def plot_key_gridworld_steps(args, data_dir="data/eval/key_gridworld",
+                              save_dir="figures/eval/key_gridworld"):
     """Plot steps-to-goal curves (Hierarchy vs Flat)."""
     os.makedirs(save_dir, exist_ok=True)
     eps_range = args.episodes
 
-    hier = np.load("data/eval/acrobot/SR_steps_hierarchy.npy")[:, :len(eps_range)]
-    flat = np.load("data/eval/acrobot/SR_steps_flat.npy")[:, :len(eps_range)]
+    hier = np.load(os.path.join(data_dir, "SR_steps_hierarchy.npy"))[:, :len(eps_range)]
+    flat = np.load(os.path.join(data_dir, "SR_steps_flat.npy"))[:, :len(eps_range)]
 
     mean_hier = np.mean(hier, axis=0)
     std_hier = np.std(hier, axis=0) / np.sqrt(len(hier))
@@ -231,21 +225,23 @@ def plot_acrobot_steps(args, save_dir="figures/eval/acrobot"):
 
     plt.xlabel("Number of Training Episodes", fontsize=28)
     plt.ylabel("Steps to Goal", fontsize=28)
+    plt.title("Key Gridworld: Steps vs Training", fontsize=28)
     plt.legend(fontsize=26)
     plt.xticks(fontsize=26)
     plt.yticks(fontsize=26)
     plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, "acrobot_steps.png"), format="png")
+    plt.savefig(os.path.join(save_dir, "key_gridworld_steps.png"), format="png")
     plt.close()
-    print(f"  Saved {save_dir}/acrobot_steps.png")
+    print(f"  Saved {save_dir}/key_gridworld_steps.png")
 
 
-def plot_acrobot_stability(args, save_dir="figures/eval/acrobot"):
+def plot_key_gridworld_stability(args, data_dir="data/eval/key_gridworld",
+                                  save_dir="figures/eval/key_gridworld"):
     """Plot relative stability bar chart (Hierarchy vs Flat)."""
     os.makedirs(save_dir, exist_ok=True)
 
-    hier_path = "data/eval/acrobot/SR_relative_stability_hierarchy.npy"
-    flat_path = "data/eval/acrobot/SR_relative_stability_flat.npy"
+    hier_path = os.path.join(data_dir, "SR_relative_stability_hierarchy.npy")
+    flat_path = os.path.join(data_dir, "SR_relative_stability_flat.npy")
 
     labels, means, sems = [], [], []
 
@@ -274,63 +270,94 @@ def plot_acrobot_stability(args, save_dir="figures/eval/acrobot"):
     plt.xticks(x, labels, fontsize=26)
     plt.yticks(fontsize=26)
     plt.ylabel("Relative Stability", fontsize=20)
+    plt.title("Key Gridworld: Relative Stability", fontsize=22)
     plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, "acrobot_relative_stability.png"), format="png")
+    plt.savefig(os.path.join(save_dir, "key_gridworld_relative_stability.png"), format="png")
     plt.close()
-    print(f"  Saved {save_dir}/acrobot_relative_stability.png")
+    print(f"  Saved {save_dir}/key_gridworld_relative_stability.png")
 
 
 # ==================== Main ====================
 
 
 if __name__ == "__main__":
-    # Acrobot configuration
-    n_theta_bins = 6
-    n_dtheta_bins = 5
-    n_clusters = 6
+    # Key Gridworld configuration
+    grid_size = 5
+    n_clusters = 5
     gamma = 0.99
-    nruns = 5
-    eps = [1000, 2000, 5000, 10000, 15000, 20000]
-    test_max_steps = 1000
+    nruns = 10
+    eps = [100, 200, 500, 750, 1000, 1500, 2000, 3000, 4000]
+    test_max_steps = 100
+    has_pickup_action = True
 
-    parser = argparse.ArgumentParser(description="Acrobot Eval: Hierarchy vs Flat")
+    init_loc = (0, 0)
+    key_loc = (3, 0)
+    goal_loc = (grid_size - 1, grid_size - 1)
+    goal_spec = (goal_loc[0], goal_loc[1], 1)  # Must have key
+
+    # Walls (same as run_key_gridworld.py)
+    walls = (
+        [(1, x) for x in range(grid_size // 2 + 1)] +
+        [(4, 2)] +
+        [(3, x) for x in range(grid_size // 2 - 1, grid_size) if x != grid_size // 2 + 1]
+    )
+
+    parser = argparse.ArgumentParser(description="Key Gridworld Eval: Hierarchy vs Flat")
     parser.add_argument("--train", action="store_true", help="Run experiments")
     parser.add_argument("--quick", action="store_true", help="Quick test")
     parser.add_argument("--n_runs", type=int, default=nruns)
     args_cli = parser.parse_args()
 
     if args_cli.quick:
-        eps = [1000, 5000, 10000]
+        eps = [500, 1500, 3000]
         nruns = 2
 
     args = argparse.Namespace(
-        n_theta_bins=n_theta_bins,
-        n_dtheta_bins=n_dtheta_bins,
+        grid_size=grid_size,
         n_clusters=n_clusters,
         gamma=gamma,
         n_runs=args_cli.n_runs if not args_cli.quick else nruns,
         episodes=eps,
         test_max_steps=test_max_steps,
+        has_pickup_action=has_pickup_action,
+        init_loc=init_loc,
+        key_loc=key_loc,
+        goal_loc=goal_loc,
+        goal_spec=goal_spec,
+        walls=walls,
         use_replay=True,
         n_replay_epochs=10,
     )
 
+    data_dir = "data/eval/key_gridworld"
+    save_dir = "figures/eval/key_gridworld"
+
     if args_cli.train:
-        os.makedirs("data/eval/acrobot/", exist_ok=True)
+        os.makedirs(data_dir, exist_ok=True)
 
         # Save args
-        with open("data/eval/acrobot/args.json", "w") as f:
-            json.dump(vars(args), f, indent=2)
+        args_save = vars(args).copy()
+        args_save["walls"] = [list(w) for w in args_save["walls"]]
+        args_save["init_loc"] = list(args_save["init_loc"])
+        args_save["key_loc"] = list(args_save["key_loc"])
+        args_save["goal_loc"] = list(args_save["goal_loc"])
+        args_save["goal_spec"] = list(args_save["goal_spec"])
+        with open(os.path.join(data_dir, "args.json"), "w") as f:
+            json.dump(args_save, f, indent=2)
+
+        n_base_states = grid_size ** 2
+        n_aug_states = n_base_states * 2  # has_key in {0, 1}
 
         print("=" * 60)
-        print("ACROBOT EVAL: Hierarchy vs Flat")
+        print("KEY GRIDWORLD EVAL: Hierarchy vs Flat")
         print("=" * 60)
-        print(f"State space: {n_theta_bins**2 * n_dtheta_bins**2} states")
+        print(f"Grid: {grid_size}x{grid_size}, Augmented states: {n_aug_states}")
+        print(f"Key at: {key_loc}, Goal at: {goal_loc} (requires key)")
         print(f"Runs: {args.n_runs}, Checkpoints: {args.episodes}")
 
         t0 = time.time()
         SR_rewards_hier, SR_rewards_flat, SR_steps_hier, SR_steps_flat = \
-            acrobot_rewards_experiment(args)
+            key_gridworld_rewards_experiment(args)
         elapsed = time.time() - t0
         print(f"\nExperiment completed in {elapsed:.0f}s")
 
@@ -345,19 +372,25 @@ if __name__ == "__main__":
         ])
 
         # Save data
-        np.save("data/eval/acrobot/SR_rewards_hierarchy.npy", SR_rewards_hier)
-        np.save("data/eval/acrobot/SR_rewards_flat.npy", SR_rewards_flat)
-        np.save("data/eval/acrobot/SR_steps_hierarchy.npy", SR_steps_hier)
-        np.save("data/eval/acrobot/SR_steps_flat.npy", SR_steps_flat)
-        np.save("data/eval/acrobot/SR_relative_stability_hierarchy.npy", SR_rel_stability_hier)
-        np.save("data/eval/acrobot/SR_relative_stability_flat.npy", SR_rel_stability_flat)
-        print("\nSaved all data to data/eval/acrobot/")
+        np.save(os.path.join(data_dir, "SR_rewards_hierarchy.npy"), SR_rewards_hier)
+        np.save(os.path.join(data_dir, "SR_rewards_flat.npy"), SR_rewards_flat)
+        np.save(os.path.join(data_dir, "SR_steps_hierarchy.npy"), SR_steps_hier)
+        np.save(os.path.join(data_dir, "SR_steps_flat.npy"), SR_steps_flat)
+        np.save(os.path.join(data_dir, "SR_relative_stability_hierarchy.npy"), SR_rel_stability_hier)
+        np.save(os.path.join(data_dir, "SR_relative_stability_flat.npy"), SR_rel_stability_flat)
+        print(f"\nSaved all data to {data_dir}/")
 
     else:
         # Load saved args
-        if os.path.exists("data/eval/acrobot/args.json"):
-            with open("data/eval/acrobot/args.json", "r") as f:
+        args_path = os.path.join(data_dir, "args.json")
+        if os.path.exists(args_path):
+            with open(args_path, "r") as f:
                 saved = json.load(f)
+                saved["walls"] = [tuple(w) for w in saved["walls"]]
+                saved["init_loc"] = tuple(saved["init_loc"])
+                saved["key_loc"] = tuple(saved["key_loc"])
+                saved["goal_loc"] = tuple(saved["goal_loc"])
+                saved["goal_spec"] = tuple(saved["goal_spec"])
                 args = argparse.Namespace(**saved)
             print(f"Loaded args: {args}")
         else:
@@ -368,14 +401,14 @@ if __name__ == "__main__":
     print("GENERATING PLOTS")
     print("=" * 60)
 
-    os.makedirs("figures/eval/acrobot", exist_ok=True)
+    os.makedirs(save_dir, exist_ok=True)
 
-    if os.path.exists("data/eval/acrobot/SR_rewards_hierarchy.npy"):
-        plot_acrobot_rewards(args)
+    if os.path.exists(os.path.join(data_dir, "SR_rewards_hierarchy.npy")):
+        plot_key_gridworld_rewards(args, data_dir=data_dir, save_dir=save_dir)
 
-    if os.path.exists("data/eval/acrobot/SR_steps_hierarchy.npy"):
-        plot_acrobot_steps(args)
+    if os.path.exists(os.path.join(data_dir, "SR_steps_hierarchy.npy")):
+        plot_key_gridworld_steps(args, data_dir=data_dir, save_dir=save_dir)
 
-    plot_acrobot_stability(args)
+    plot_key_gridworld_stability(args, data_dir=data_dir, save_dir=save_dir)
 
-    print("\nDone! Figures saved to figures/eval/acrobot/")
+    print(f"\nDone! Figures saved to {save_dir}/")

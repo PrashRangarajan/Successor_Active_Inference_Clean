@@ -122,13 +122,18 @@ class POMDPGridworldAdapter(BaseEnvironmentAdapter):
                                    noise_spread: float) -> np.ndarray:
         """Create the observation likelihood matrix A.
 
-        Default: Identity matrix with small noise
-        Noisy states: Use gamma distribution for spread
+        Default: Identity matrix with small noise.
+        Noisy states: Much higher noise (more uniform observations = higher entropy).
+
+        The noise_spread parameter controls how noisy the designated states are:
+        - noise_spread=1.0: noisy states have same noise as base (no effect)
+        - noise_spread=3.0: noisy states are 3x noisier than base
+        - noise_spread=5.0: noisy states are 5x noisier (very ambiguous)
 
         Args:
-            noise_level: Base noise level for all states
-            noisy_states: States with extra observation noise
-            noise_spread: Shape parameter for gamma distribution
+            noise_level: Base noise level for all states (probability of wrong obs)
+            noisy_states: States with extra observation noise (higher entropy)
+            noise_spread: Multiplier for noise in designated states
 
         Returns:
             A: Observation model, shape (n_obs, n_states)
@@ -141,19 +146,14 @@ class POMDPGridworldAdapter(BaseEnvironmentAdapter):
         # Add small uniform noise
         A += noise_level / N
 
-        # Add extra noise for specified states (e.g., hallways, ambiguous locations)
+        # Make designated states noisier by increasing their uniform noise component
+        # Higher noise_spread → observations more uniform → higher entropy
         if noisy_states is not None:
+            noisy_noise = min(noise_level * noise_spread, 0.95)  # Cap at 95%
             for state_idx in noisy_states:
-                # Use gamma distribution centered around the state
-                # This creates a "blur" of observations around the true state
-                gamma_noise = stats.gamma.pdf(np.arange(N), a=noise_spread, scale=1)
-                # Shift to center around the state
-                shift = state_idx - int(noise_spread)
-                gamma_noise = np.roll(gamma_noise, shift)
-                # Normalize
-                gamma_noise = gamma_noise / gamma_noise.sum()
-                # Replace the column
-                A[:, state_idx] = gamma_noise
+                # Reconstruct column with higher noise level
+                A[:, state_idx] = noisy_noise / N  # uniform component
+                A[state_idx, state_idx] += (1 - noisy_noise)  # identity component
 
         # Normalize columns (each column should sum to 1)
         A = A / A.sum(axis=0, keepdims=True)

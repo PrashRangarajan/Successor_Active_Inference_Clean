@@ -846,7 +846,9 @@ class HierarchicalSRAgent(VisualizationMixin):
         values = []
         for action in range(self.adapter.n_actions):
             s_next_dist = self.adapter.multiply_B_s(self.B, s_onehot, action)
-            expected_value = float(s_next_dist @ V)
+            # Flatten for augmented state spaces (e.g., key gridworld: shape (N,2))
+            s_flat = s_next_dist.flatten('F') if s_next_dist.ndim > 1 else s_next_dist
+            expected_value = float(s_flat @ V)
             values.append(expected_value)
 
         # Select best action that actually changes expected state
