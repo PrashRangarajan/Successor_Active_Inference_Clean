@@ -1,0 +1,19 @@
+{
+  "n_theta_bins": 20,
+  "n_omega_bins": 20,
+  "n_torque_bins": 5,
+  "n_clusters": 4,
+  "gamma": 0.95,
+  "n_runs": 5,
+  "episodes": [
+    500,
+    1000,
+    2000,
+    3000,
+    5000,
+    8000
+  ],
+  "test_max_steps": 200,
+  "use_replay": true,
+  "n_replay_epochs": 10
+}

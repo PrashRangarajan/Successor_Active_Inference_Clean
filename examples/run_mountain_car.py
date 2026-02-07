@@ -1,6 +1,7 @@
 """Example: Running hierarchical SR agent on Mountain Car.
 
 This demonstrates how to use the unified agent with the Mountain Car environment.
+Generates cluster heatmap, macro-state trajectory, stage diagram, and video.
 """
 
 import sys
@@ -29,7 +30,11 @@ def run_mountain_car_example():
     init_state = [-0.5, 0.0]  # Start in middle with zero velocity
 
     # Create gymnasium environment with rgb_array rendering for video
-    env = gym.make("MountainCar-v0", render_mode="rgb_array")
+    # Override default max_episode_steps (200) — the agent needs more steps
+    # to explore the full state space during learning and to reach the goal
+    # during testing.  Without this, Gym's TimeLimit wrapper truncates
+    # episodes before the car can swing up to position ≥ 0.5.
+    env = gym.make("MountainCar-v0", render_mode="rgb_array", max_episode_steps=500)
 
     # Wrap with adapter
     adapter = MountainCarAdapter(env, n_pos_bins=n_pos_bins, n_vel_bins=n_vel_bins)
@@ -87,82 +92,115 @@ def run_mountain_car_example():
     print(f"Hierarchical: {result['steps']} steps, reached goal: {result['reached_goal']}")
     print(f"Flat: {result_flat['steps']} steps, reached goal: {result_flat['reached_goal']}")
 
-    # Visualize matrices (works for all environments)
+    # ==================== Visualization ====================
     print("\n" + "="*50)
     print("VISUALIZATION")
     print("="*50)
 
+    os.makedirs("figures/mountaincar", exist_ok=True)
+
+    # Matrix visualizations
     agent.view_matrices(save_dir="figures/mountaincar/matrices", learned=True)
     print("  Saved matrix visualizations to figures/mountaincar/matrices/")
 
-    # Record a video of the flat policy
+    # Cluster heatmap
+    agent.visualize_clusters(save_dir="figures/mountaincar/clustering")
+
+    # ==================== Record Episode + Trajectory ====================
     print("\n" + "="*50)
-    print("RECORDING VIDEO")
+    print("RECORDING VIDEO & TRAJECTORY")
     print("="*50)
 
-    os.makedirs("figures/mountaincar", exist_ok=True)
-    video_path = "figures/mountaincar/mountain_car_episode.mp4"
-
-    frames = run_episode_with_video(agent, adapter, init_state, max_steps=500)
+    frames, positions, velocities, actions = run_episode_with_tracking(
+        agent, adapter, init_state, max_steps=500,
+    )
 
     if frames:
+        video_path = "figures/mountaincar/mountain_car_episode.mp4"
         imageio.mimsave(video_path, frames, fps=30, macro_block_size=1)
-        print(f"Video saved to: {video_path}")
+        print(f"  Video saved to: {video_path} ({len(frames)} frames)")
     else:
-        print("No frames captured")
+        print("  No frames captured")
+
+    if positions:
+        # Trajectory colored by macro state
+        agent.plot_trajectory_with_macro_states(
+            positions, velocities,
+            save_path="figures/mountaincar/trajectory_macro.png",
+        )
+
+        # Stage diagram (snapshots + phase plot)
+        if frames:
+            agent.plot_stage_state_diagram(
+                frames, positions, velocities,
+                save_path="figures/mountaincar/mountaincar_stages.png",
+            )
+
+            # Combined vertical video (environment + animated trajectory)
+            agent.generate_combined_video(
+                frames, positions, velocities,
+                save_path="figures/mountaincar/mountain_car_combined.mp4",
+            )
 
     env.close()
 
+    print("\n" + "="*50)
+    print("DONE")
+    print("="*50)
 
-def run_episode_with_video(agent, adapter, init_state, max_steps=500):
-    """Run an episode and capture frames for video."""
+
+def run_episode_with_tracking(agent, adapter, init_state, max_steps=500):
+    """Run an episode capturing frames, positions, and velocities.
+
+    Uses the agent's own flat policy (``_select_micro_action``) so the
+    recorded trajectory matches what ``run_episode_flat`` would produce.
+
+    Returns:
+        (frames, positions, velocities, actions) tuple
+    """
     frames = []
+    positions = []
+    velocities = []
+    actions_taken = []
 
-    # Reset
-    adapter.reset(init_state)
+    # Reset via the agent so agent.current_state is properly initialised
+    agent.reset_episode(init_state=init_state)
 
-    # Compute value function
+    # Compute value function (same as run_episode_flat)
     V = adapter.multiply_M_C(agent.M, agent.C)
 
-    done = False
     steps = 0
 
-    while not done and steps < max_steps:
+    while steps < max_steps and not agent._is_at_goal():
+        # Record continuous state
+        obs = adapter.get_current_obs()
+        positions.append(float(obs[0]))
+        velocities.append(float(obs[1]))
+
         # Capture frame
         frame = adapter.env.render()
         if frame is not None:
             frames.append(frame)
 
-        # Get current state
-        state_onehot = adapter._current_state
-        state_idx = adapter.get_current_state_index()
+        # Select action using the agent's micro-level policy
+        action = agent._select_micro_action(V)
+        actions_taken.append(action)
 
-        # Compute values for each action
-        V_adj = []
-        for act in range(adapter.n_actions):
-            s_next = adapter.multiply_B_s(agent.B, state_onehot, act)
-            next_idx = adapter.onehot_to_index(s_next)
-            V_adj.append(V[next_idx])
-
-        best_action = np.argmax(V_adj)
-
-        # Take action with smooth stepping
-        for _ in range(4):
-            _, _, terminated, truncated, _ = adapter.step_with_info(best_action)
-            done = terminated or truncated
-
-            # Capture frame after each step
-            frame = adapter.env.render()
-            if frame is not None:
-                frames.append(frame)
-
-            if done or adapter.get_current_state_index() in agent.goal_states:
-                done = True
-                break
+        # Single step (matches run_episode_flat)
+        adapter.step(action)
+        agent.current_state = agent._get_planning_state()
 
         steps += 1
 
-    return frames
+    # Record final state
+    obs = adapter.get_current_obs()
+    positions.append(float(obs[0]))
+    velocities.append(float(obs[1]))
+    frame = adapter.env.render()
+    if frame is not None:
+        frames.append(frame)
+
+    return frames, positions, velocities, actions_taken
 
 
 if __name__ == '__main__':
