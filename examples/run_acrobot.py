@@ -24,13 +24,13 @@ def run_acrobot_example():
     """Run the hierarchical SR agent on Acrobot."""
 
     # Configuration
-    n_theta_bins = 12    # Number of bins for angles (theta1, theta2)
-    n_dtheta_bins = 10   # Number of bins for angular velocities (dtheta1, dtheta2)
+    n_theta_bins = 6    # Number of bins for angles (theta1, theta2)
+    n_dtheta_bins = 5  # Number of bins for angular velocities (dtheta1, dtheta2)
     n_clusters = 6       # Number of macro states
     gamma = 0.99
     learning_rate = 0.05
-    train_episodes = 5000   # Episodes for learning dynamics
-    test_max_steps = 500    # Max steps per test episode
+    train_episodes = 10000   # Episodes for learning dynamics
+    test_max_steps = 1000   # Max steps per test episode
 
     # Initial state: [theta1, theta2, dtheta1, dtheta2]
     # Start hanging down with zero velocity
@@ -209,8 +209,13 @@ def plot_macro_distribution(agent, save_path: str):
 
 
 def run_video_episode(agent, adapter, save_path: str, max_steps: int = 300):
-    """Run an episode and save video."""
+    """Run an episode and save video.
+
+    Uses the same goal check as the agent (discrete bin membership) so the
+    video termination matches the agent's reported reached_goal.
+    """
     frames = []
+    goal_states_set = set(agent.goal_states)
 
     adapter.reset(init_state=[0.0, 0.0, 0.0, 0.0])
 
@@ -223,12 +228,11 @@ def run_video_episode(agent, adapter, save_path: str, max_steps: int = 300):
         state_onehot = adapter._current_state
         state_idx = adapter.onehot_to_index(state_onehot)
 
-        # Compute values for each action
+        # Compute expected value for each action (handles stochastic transitions)
         V_adj = []
         for act in range(adapter.n_actions):
-            s_next = adapter.multiply_B_s(agent.B, state_onehot, act)
-            next_idx = adapter.onehot_to_index(s_next)
-            V_adj.append(V[next_idx])
+            s_next_dist = adapter.multiply_B_s(agent.B, state_onehot, act)
+            V_adj.append(float(s_next_dist @ V))
 
         best_action = np.argmax(V_adj)
 
@@ -238,15 +242,30 @@ def run_video_episode(agent, adapter, save_path: str, max_steps: int = 300):
         if frame is not None:
             frames.append(frame)
 
-        # Check terminal
-        if adapter.is_terminal():
+        # Check terminal: require BOTH discrete goal bin AND continuous terminal
+        s_idx = adapter.get_current_state_index()
+        in_goal_bin = s_idx in goal_states_set
+        continuous_terminal = adapter.is_terminal()
+
+        if in_goal_bin and continuous_terminal:
             done = True
+            print(f"  Step {steps}: Reached goal (bin + continuous agree)")
+        elif continuous_terminal:
+            # Continuous says terminal but discrete bin doesn't match
+            done = True
+            print(f"  Step {steps}: Continuous terminal (not in goal bin — edge case)")
+        elif in_goal_bin:
+            # In goal bin but continuous state not yet terminal — keep going
+            pass
 
         steps += 1
 
+    if not done:
+        print(f"  Episode ended at max_steps={max_steps} without reaching goal")
+
     if frames:
         imageio.mimsave(save_path, frames, fps=30)
-        print(f"  Saved video to {save_path}")
+        print(f"  Saved video to {save_path} ({steps} steps)")
     else:
         print("  No frames to save")
 

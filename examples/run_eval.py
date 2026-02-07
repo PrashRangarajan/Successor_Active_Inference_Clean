@@ -81,7 +81,8 @@ def relative_stability_paper_style(returns, Ke=100, smooth_window=1, eps=1e-8):
 
 
 def create_sr_agent(grid_size, walls, n_clusters, goal_loc, goal_val,
-                    num_episodes, gamma=0.99, learning_rate=0.05):
+                    num_episodes, gamma=0.99, learning_rate=0.05,
+                    use_replay=True, n_replay_epochs=10):
     """Create a fresh SR agent trained for exactly num_episodes.
 
     Because learn_environment() is NOT incremental (each call creates fresh
@@ -100,6 +101,8 @@ def create_sr_agent(grid_size, walls, n_clusters, goal_loc, goal_val,
         gamma=gamma,
         learning_rate=learning_rate,
         learn_from_experience=True,  # Must learn from experience for convergence experiments
+        use_replay=use_replay,
+        n_replay_epochs=n_replay_epochs,
     )
     agent.set_goal(goal_loc, reward=goal_val)
     agent.learn_environment(num_episodes)
@@ -333,13 +336,13 @@ def SR_distances(args, GOALS):
 
 
 if __name__ == "__main__":
-    # Default configuration (matches legacy experiment)
     grid_size = 9
     n_macro = 4
     init_loc = (0, 0)
     goal_loc = (grid_size - 1, grid_size - 1)
     nruns = 20
     eps = [50, 100, 200, 300, 400, 500, 750, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000]
+    # eps = [50, 100, 250, 500, 1000, 2000, 4000, 8000]
     GOALS = [(0, 3), (0, 6), (2, 4), (3, 0), (4, 4), (5, 8), (6, 3), (7, 0), (8, 4), (8, 8)]
     goal_val = 100
 

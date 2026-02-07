@@ -232,6 +232,43 @@ class AcrobotAdapter(BaseEnvironmentAdapter):
         """Render the environment."""
         return self._env.render()
 
+    def sample_random_state(self) -> np.ndarray:
+        """Reset to a uniformly random state across the full state space.
+
+        Samples random angles in [-pi, pi] and angular velocities within
+        the Acrobot's physical limits, then sets the underlying Gym state
+        directly.  This ensures every region of the discretised state space
+        has a chance of being visited during training — critical for building
+        a complete transition model B.
+
+        Returns:
+            One-hot encoded discretised state (same as ``reset``).
+        """
+        # First do a normal reset so Gym's internal bookkeeping is valid
+        obs, _ = self._env.reset()
+
+        # Sample random continuous state
+        theta1 = np.random.uniform(-np.pi, np.pi)
+        theta2 = np.random.uniform(-np.pi, np.pi)
+        dtheta1 = np.random.uniform(-4 * np.pi, 4 * np.pi)
+        dtheta2 = np.random.uniform(-9 * np.pi, 9 * np.pi)
+
+        # Inject into the physics engine
+        self._env.unwrapped.state = np.array([theta1, theta2, dtheta1, dtheta2])
+
+        # Build the corresponding observation
+        obs = np.array([
+            np.cos(theta1), np.sin(theta1),
+            np.cos(theta2), np.sin(theta2),
+            dtheta1, dtheta2,
+        ])
+
+        self._current_obs = obs
+        discrete_state = self.discretize_obs(obs)
+        state_idx = self.state_space.state_to_index(discrete_state)
+        self._current_state = self.state_space.index_to_onehot(state_idx)
+        return self._current_state
+
     # ==================== Matrix Operations ====================
 
     def multiply_B_s(self, B: np.ndarray, state: np.ndarray, action: Optional[int]) -> np.ndarray:
@@ -304,6 +341,10 @@ class AcrobotAdapter(BaseEnvironmentAdapter):
         For Acrobot, the default goal is the terminal condition used by the environment:
             -cos(theta1) - cos(theta1 + theta2) > 1.0
 
+        A bin is marked as a goal if the bin CENTER satisfies the terminal
+        condition.  With 6 angle bins this gives ~17% of angle bins as goals,
+        closely matching the true continuous fraction (~18.5%).
+
         Args:
             goal_spec: None (default terminal condition),
                       or (theta1, theta2) continuous angles for a target bin
@@ -313,15 +354,19 @@ class AcrobotAdapter(BaseEnvironmentAdapter):
         """
         if goal_spec is None:
             goal_states = []
-            # Get bin centers for checking terminal condition
-            theta1_centers = np.linspace(-np.pi, np.pi, self.n_theta_bins)
-            theta2_centers = np.linspace(-np.pi, np.pi, self.n_theta_bins)
 
-            for i, theta1 in enumerate(theta1_centers):
-                for j, theta2 in enumerate(theta2_centers):
-                    # Check Acrobot terminal condition
-                    if (-np.cos(theta1) - np.cos(theta1 + theta2)) > 1.0:
-                        # All velocity states at this angle are terminal
+            # Bin edges and centers
+            theta1_edges = np.linspace(-np.pi, np.pi, self.n_theta_bins + 1)
+            theta2_edges = np.linspace(-np.pi, np.pi, self.n_theta_bins + 1)
+            theta1_centers = (theta1_edges[:-1] + theta1_edges[1:]) / 2.0
+            theta2_centers = (theta2_edges[:-1] + theta2_edges[1:]) / 2.0
+
+            for i in range(self.n_theta_bins):
+                for j in range(self.n_theta_bins):
+                    t1 = theta1_centers[i]
+                    t2 = theta2_centers[j]
+                    if (-np.cos(t1) - np.cos(t1 + t2)) > 1.0:
+                        # All velocity states at this angle bin are terminal
                         for dt1 in range(self.n_dtheta_bins):
                             for dt2 in range(self.n_dtheta_bins):
                                 state_idx = self.state_space.state_to_index((i, j, dt1, dt2))
@@ -357,11 +402,27 @@ class AcrobotAdapter(BaseEnvironmentAdapter):
             raise ValueError(f"Invalid goal specification for Acrobot: {goal_spec}")
 
     def is_terminal(self, obs: np.ndarray = None) -> bool:
-        """Check if current or given observation is terminal."""
+        """Check if current or given observation is terminal.
+
+        Uses the continuous state directly to check the Acrobot terminal
+        condition: -cos(theta1) - cos(theta1 + theta2) > 1.0
+        """
         if obs is None:
             obs = self._current_obs
         theta1, theta2 = angles_from_obs(obs)
         return (-np.cos(theta1) - np.cos(theta1 + theta2)) > 1.0
+
+    def is_in_goal_bin(self, goal_states: List[int], obs: np.ndarray = None) -> bool:
+        """Check if the current discretized state is in the goal state set.
+
+        This matches the agent's goal check exactly, avoiding mismatches
+        between the continuous terminal condition and the discretized goal bins.
+        """
+        if obs is None:
+            obs = self._current_obs
+        discrete_state = self.discretize_obs(obs)
+        state_idx = self.state_space.state_to_index(discrete_state)
+        return state_idx in goal_states
 
     # ==================== Visualization ====================
 

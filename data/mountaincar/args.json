@@ -1,0 +1,15 @@
+{
+  "n_pos_bins": 10,
+  "n_vel_bins": 10,
+  "n_clusters": 6,
+  "gamma": 0.95,
+  "n_runs": 2,
+  "episodes": [
+    1000,
+    4000,
+    8000
+  ],
+  "test_max_steps": 500,
+  "use_replay": true,
+  "n_replay_epochs": 10
+}

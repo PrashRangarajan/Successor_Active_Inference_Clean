@@ -1,12 +1,15 @@
 """Plotting functions for evaluation benchmarks.
 
 Generates paper-quality figures from .npy data files produced by run_eval.py.
-All figures save to figures/eval/.
+
+Directory structure:
+    data/eval/<env>/       — .npy data files
+    figures/eval/<env>/    — output figures
 
 Can be run standalone:
     python examples/plot_eval.py
 
-Or imported by run_eval.py.
+Or imported by run_eval.py / run_eval_acrobot.py / run_eval_mountaincar.py.
 """
 
 import sys
@@ -68,21 +71,21 @@ def get_distance(grid_size, walls, start, goal):
 # ==================== Plot Functions ====================
 
 
-def plot_SR_rewards(args, save_dir="figures/eval"):
+def plot_SR_rewards(args, data_dir="data/eval/gridworld", save_dir="figures/eval/gridworld"):
     """Plot reward curves with confidence bands (Hierarchy vs Flat vs Q-Learning)."""
     os.makedirs(save_dir, exist_ok=True)
     eps_range = args.episodes
 
-    SR_rewards = np.load("data/SR_rewards_hierarchy.npy")[:, :len(eps_range)]
+    SR_rewards = np.load(os.path.join(data_dir, "SR_rewards_hierarchy.npy"))[:, :len(eps_range)]
     mean_SR_rewards = np.mean(SR_rewards, axis=0)
     std_SR_rewards = np.std(SR_rewards, axis=0) / np.sqrt(len(SR_rewards))
 
-    SR_rewards2 = np.load("data/SR_rewards_flat.npy")[:, :len(eps_range)]
+    SR_rewards2 = np.load(os.path.join(data_dir, "SR_rewards_flat.npy"))[:, :len(eps_range)]
     mean_SR_rewards2 = np.mean(SR_rewards2, axis=0)
     std_SR_rewards2 = np.std(SR_rewards2, axis=0) / np.sqrt(len(SR_rewards2))
 
     # Load Q-learning rewards if available
-    Q_rewards_path = "data/Q_rewards.npy"
+    Q_rewards_path = os.path.join(data_dir, "Q_rewards.npy")
     has_q_learning = os.path.exists(Q_rewards_path)
     if has_q_learning:
         Q_rewards = np.load(Q_rewards_path)[:, :len(eps_range)]
@@ -124,16 +127,16 @@ def plot_SR_rewards(args, save_dir="figures/eval"):
     print(f"  Saved {save_dir}/reward_obtained.png")
 
 
-def plot_SR_values(args, save_dir="figures/eval"):
+def plot_SR_values(args, data_dir="data/eval/gridworld", save_dir="figures/eval/gridworld"):
     """Plot SR convergence: goal value distance + successor matrix distance."""
     os.makedirs(save_dir, exist_ok=True)
     eps_range = args.episodes
 
-    SR_values = np.load("data/SR_values_hierarchy.npy")[:, :len(eps_range)]
-    SR_values2 = np.load("data/SR_values_flat.npy")[:, :len(eps_range)]
-    SR_succ = np.load("data/SR_succ_hierarchy.npy")[:, :len(eps_range)]
-    SR_succ2 = np.load("data/SR_succ_flat.npy")[:, :len(eps_range)]
-    SR_succ_macro = np.load("data/SR_succ_macro.npy")[:, :len(eps_range)]
+    SR_values = np.load(os.path.join(data_dir, "SR_values_hierarchy.npy"))[:, :len(eps_range)]
+    SR_values2 = np.load(os.path.join(data_dir, "SR_values_flat.npy"))[:, :len(eps_range)]
+    SR_succ = np.load(os.path.join(data_dir, "SR_succ_hierarchy.npy"))[:, :len(eps_range)]
+    SR_succ2 = np.load(os.path.join(data_dir, "SR_succ_flat.npy"))[:, :len(eps_range)]
+    SR_succ_macro = np.load(os.path.join(data_dir, "SR_succ_macro.npy"))[:, :len(eps_range)]
 
     # Goal value distance plot
     mean_SR_values = np.mean(SR_values, axis=0)
@@ -198,13 +201,13 @@ def plot_SR_values(args, save_dir="figures/eval"):
     print(f"  Saved {save_dir}/successor_values.png")
 
 
-def plot_SR_steps(args, save_dir="figures/eval"):
+def plot_SR_steps(args, data_dir="data/eval/gridworld", save_dir="figures/eval/gridworld"):
     """Plot number of steps to success."""
     os.makedirs(save_dir, exist_ok=True)
     eps_range = args.episodes
 
-    SR_steps = np.load("data/SR_steps_hierarchy.npy")
-    SR_steps2 = np.load("data/SR_steps_flat.npy")
+    SR_steps = np.load(os.path.join(data_dir, "SR_steps_hierarchy.npy"))
+    SR_steps2 = np.load(os.path.join(data_dir, "SR_steps_flat.npy"))
     mean_SR_steps = np.mean(SR_steps, axis=0)
     mean_SR_steps2 = np.mean(SR_steps2, axis=0)
     std_SR_steps = np.std(SR_steps, axis=0) / np.sqrt(len(SR_steps))
@@ -237,13 +240,13 @@ def plot_SR_steps(args, save_dir="figures/eval"):
     print(f"  Saved {save_dir}/num_steps.png")
 
 
-def plot_SR_times(args, save_dir="figures/eval"):
+def plot_SR_times(args, data_dir="data/eval/gridworld", save_dir="figures/eval/gridworld"):
     """Plot processing time comparison."""
     os.makedirs(save_dir, exist_ok=True)
     eps_range = args.episodes
 
-    SR_times = np.load("data/SR_times_hierarchy.npy")
-    SR_times2 = np.load("data/SR_times_flat.npy")
+    SR_times = np.load(os.path.join(data_dir, "SR_times_hierarchy.npy"))
+    SR_times2 = np.load(os.path.join(data_dir, "SR_times_flat.npy"))
     mean_SR_times = np.mean(SR_times, axis=0)
     mean_SR_times2 = np.mean(SR_times2, axis=0)
     std_SR_times = np.std(SR_times, axis=0) / np.sqrt(len(SR_times))
@@ -275,12 +278,12 @@ def plot_SR_times(args, save_dir="figures/eval"):
     print(f"  Saved {save_dir}/processing_times.png")
 
 
-def plot_SR_distances(args, GOALS, save_dir="figures/eval"):
+def plot_SR_distances(args, GOALS, data_dir="data/eval/gridworld", save_dir="figures/eval/gridworld"):
     """Plot planning steps vs BFS distance from goal."""
     os.makedirs(save_dir, exist_ok=True)
 
-    SR_dists = np.load("data/SR_dists_hierarchy.npy")
-    SR_dists2 = np.load("data/SR_dists_flat.npy")
+    SR_dists = np.load(os.path.join(data_dir, "SR_dists_hierarchy.npy"))
+    SR_dists2 = np.load(os.path.join(data_dir, "SR_dists_flat.npy"))
     mean_SR_dists = np.mean(SR_dists, axis=0)
     mean_SR_dists2 = np.mean(SR_dists2, axis=0)
     std_SR_dists = np.std(SR_dists, axis=0) / np.sqrt(len(SR_dists))
@@ -316,14 +319,14 @@ def plot_SR_distances(args, GOALS, save_dir="figures/eval"):
     print(f"  Saved {save_dir}/num_dist.png")
 
 
-def plot_relative_stability(args, save_dir="figures/eval"):
+def plot_relative_stability(args, data_dir="data/eval/gridworld", save_dir="figures/eval/gridworld"):
     """Plot relative stability bar chart (lower is better)."""
     os.makedirs(save_dir, exist_ok=True)
 
-    hierarchy_path = "data/SR_relative_stability_hierarchy.npy"
-    flat_path = "data/SR_relative_stability_flat.npy"
-    q_learning_path = "data/Q_relative_stability.npy"
-    single_path = "data/SR_relative_stability.npy"
+    hierarchy_path = os.path.join(data_dir, "SR_relative_stability_hierarchy.npy")
+    flat_path = os.path.join(data_dir, "SR_relative_stability_flat.npy")
+    q_learning_path = os.path.join(data_dir, "Q_relative_stability.npy")
+    single_path = os.path.join(data_dir, "SR_relative_stability.npy")
 
     labels, means, sems = [], [], []
 
@@ -379,15 +382,19 @@ def plot_relative_stability(args, save_dir="figures/eval"):
 
 
 if __name__ == "__main__":
+    data_dir = "data/eval/gridworld"
+    save_dir = "figures/eval/gridworld"
+
     # Load saved args
-    if os.path.exists("data/args.json"):
-        with open("data/args.json", "r") as f:
+    args_path = os.path.join(data_dir, "args.json")
+    if os.path.exists(args_path):
+        with open(args_path, "r") as f:
             saved = json.load(f)
             saved["walls"] = [tuple(w) for w in saved["walls"]]
             saved["init_loc"] = tuple(saved["init_loc"])
             saved["goal_loc"] = tuple(saved["goal_loc"])
             args = argparse.Namespace(**saved)
-        print(f"Loaded args from data/args.json")
+        print(f"Loaded args from {args_path}")
     else:
         # Use defaults
         grid_size = 9
@@ -411,27 +418,27 @@ if __name__ == "__main__":
 
     GOALS = [(0, 3), (0, 6), (2, 4), (3, 0), (4, 4), (5, 8), (6, 3), (7, 0), (8, 4), (8, 8)]
 
-    os.makedirs("figures/eval", exist_ok=True)
+    os.makedirs(save_dir, exist_ok=True)
 
     print("Generating evaluation plots...")
 
     # Always try these (main experiment outputs)
-    if os.path.exists("data/SR_rewards_hierarchy.npy"):
-        plot_SR_rewards(args)
+    if os.path.exists(os.path.join(data_dir, "SR_rewards_hierarchy.npy")):
+        plot_SR_rewards(args, data_dir=data_dir, save_dir=save_dir)
 
-    if os.path.exists("data/SR_values_hierarchy.npy"):
-        plot_SR_values(args)
+    if os.path.exists(os.path.join(data_dir, "SR_values_hierarchy.npy")):
+        plot_SR_values(args, data_dir=data_dir, save_dir=save_dir)
 
-    plot_relative_stability(args)
+    plot_relative_stability(args, data_dir=data_dir, save_dir=save_dir)
 
     # Optional plots (require specific data files)
-    if os.path.exists("data/SR_steps_hierarchy.npy"):
-        plot_SR_steps(args)
+    if os.path.exists(os.path.join(data_dir, "SR_steps_hierarchy.npy")):
+        plot_SR_steps(args, data_dir=data_dir, save_dir=save_dir)
 
-    if os.path.exists("data/SR_times_hierarchy.npy"):
-        plot_SR_times(args)
+    if os.path.exists(os.path.join(data_dir, "SR_times_hierarchy.npy")):
+        plot_SR_times(args, data_dir=data_dir, save_dir=save_dir)
 
-    if os.path.exists("data/SR_dists_hierarchy.npy"):
-        plot_SR_distances(args, GOALS)
+    if os.path.exists(os.path.join(data_dir, "SR_dists_hierarchy.npy")):
+        plot_SR_distances(args, GOALS, data_dir=data_dir, save_dir=save_dir)
 
     print("\nDone!")
