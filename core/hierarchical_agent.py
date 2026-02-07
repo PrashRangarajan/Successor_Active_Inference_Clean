@@ -36,6 +36,10 @@ class HierarchicalSRAgent(VisualizationMixin):
         gamma: float = 0.99,
         learning_rate: float = 0.05,
         learn_from_experience: bool = True,
+        use_replay: bool = True,
+        n_replay_epochs: int = 10,
+        replay_buffer_size: int = 50000,
+        replay_mode: str = 'sequential',
     ):
         """
         Args:
@@ -45,6 +49,14 @@ class HierarchicalSRAgent(VisualizationMixin):
             learning_rate: TD learning rate for SR updates
             learn_from_experience: If True, learn B and M from experience.
                                    If False, use analytical computation.
+            use_replay: If True, learn M via TD with hippocampal-style
+                        experience replay (bioplausible). If False, compute
+                        M analytically from B (fast but not bioplausible).
+                        Only applies when learn_from_experience=True.
+            n_replay_epochs: Number of replay passes over stored experiences.
+            replay_buffer_size: Maximum transitions to store for replay.
+            replay_mode: 'sequential' (bioplausible, preserves temporal order)
+                         or 'shuffle' (randomize episode order each epoch).
         """
         self.adapter = adapter
         self.n_clusters = n_clusters
@@ -77,6 +89,20 @@ class HierarchicalSRAgent(VisualizationMixin):
         self.state_history = []
         self.action_history = []
 
+        # Experience replay (hippocampal replay)
+        self.use_replay = use_replay
+        self.n_replay_epochs = n_replay_epochs
+        self.replay_buffer_size = replay_buffer_size
+        self.replay_mode = replay_mode
+        self.replay_buffer = []  # list of episodes; each episode is a list of (s, a, s', r, done)
+        self._replay_buffer_total = 0
+
+        # Policy caching
+        self._policy_compiled = False
+        self._goal_policy = None
+        self._bottleneck_policies = None
+        self._macro_policy = None
+
     # ==================== Core Learning ====================
 
     def learn_environment(self, num_episodes: int = 1000):
@@ -98,6 +124,11 @@ class HierarchicalSRAgent(VisualizationMixin):
             )
         else:
             self.B = self.adapter.get_transition_matrix()
+            # Make goal states absorbing (same treatment as the learned path)
+            if self.goal_states:
+                self.B = self.adapter.normalize_transition_matrix(
+                    self.B, goal_states=self.goal_states
+                )
             self.M = self.adapter.compute_successor_from_transition(self.B, self.gamma)
 
         print("Learning macro state clusters...")
@@ -129,7 +160,34 @@ class HierarchicalSRAgent(VisualizationMixin):
         """
         self.goal_states = self.adapter.get_goal_states(goal_spec)
         self.C = self.adapter.create_goal_prior(self.goal_states, reward, default_cost)
+        self._policy_compiled = False  # Invalidate cached policy
         print(f"Goal states: {self.goal_states}")
+
+    def _is_at_goal(self) -> bool:
+        """Check if the agent has reached a goal state.
+
+        Uses the discrete goal-bin check (s_idx in goal_states) as the primary
+        condition.  For continuous environments that implement ``is_terminal()``,
+        the continuous check is used as a tie-breaker: the agent is considered
+        at the goal only if BOTH the discrete bin is a goal bin AND the
+        continuous state is terminal.  This prevents false positives from coarse
+        discretization, where a bin center may be terminal but the actual
+        continuous state is not (or vice versa).
+        """
+        s_idx = self.adapter.get_current_state_index()
+        in_goal_bin = s_idx in self.goal_states
+
+        # If no discrete match, definitely not at goal
+        if not in_goal_bin:
+            return False
+
+        # If the adapter supports continuous terminal checks, require both
+        continuous_check = self.adapter.is_terminal()
+        if continuous_check is not None:
+            return continuous_check  # True only if continuous state is also terminal
+
+        # Pure discrete: goal bin membership is sufficient
+        return True
 
     # ==================== Successor Representation Learning ====================
 
@@ -150,17 +208,30 @@ class HierarchicalSRAgent(VisualizationMixin):
 
         episode_length = 40
         experiences = []
+        current_episode = []  # transitions for replay buffer
 
         # Determine if this is a continuous environment that needs smooth stepping
         # Check if adapter has a step_with_info method (continuous envs) or grid_size (discrete)
         is_continuous = not hasattr(self.adapter, 'grid_size')
         smooth_steps = 10 if is_continuous else 1
 
+        # Diverse-start exploration: if the adapter provides sample_random_state(),
+        # use it for most episodes to fill in the transition model uniformly.
+        # When using diverse starts, we ignore Gym's terminal/truncated flags
+        # because we want to learn the full transition structure — a transition
+        # from state X → state Y is valid physics regardless of whether Gym
+        # considers the episode "done".  Episodes that start from random high-
+        # energy states would otherwise terminate immediately, wasting samples.
+        has_diverse_starts = hasattr(self.adapter, 'sample_random_state')
+
         for ep in range(num_episodes):
             if (ep + 1) % 100 == 0:
                 print(f"Learning episode {ep + 1}/{num_episodes}", end='\r')
 
-            self.adapter.reset()
+            if has_diverse_starts:
+                self.adapter.sample_random_state()
+            else:
+                self.adapter.reset()
             s = self.adapter.get_current_state_index()
             done = False
 
@@ -169,12 +240,28 @@ class HierarchicalSRAgent(VisualizationMixin):
                     break
 
                 action = random.randrange(self.adapter.n_actions)
+                reseeded = False
 
                 # For continuous envs, take multiple steps to let state actually change
                 for _ in range(smooth_steps):
                     if hasattr(self.adapter, 'step_with_info'):
                         _, _, terminated, truncated, _ = self.adapter.step_with_info(action)
-                        done = terminated or truncated
+                        if has_diverse_starts and (terminated or truncated):
+                            # Record this final transition, then re-seed
+                            s_next = self.adapter.get_current_state_index()
+                            self._update_transition_count(B, s, s_next, action)
+                            # Store terminal transition for replay
+                            reward = self._get_reward(s_next) if self.C is not None else 0
+                            current_episode.append((s, action, s_next, reward, True))
+                            if current_episode:
+                                self._store_replay_episode(current_episode)
+                                current_episode = []
+                            self.adapter.sample_random_state()
+                            s = self.adapter.get_current_state_index()
+                            reseeded = True
+                            break
+                        elif not has_diverse_starts:
+                            done = terminated or truncated
                     else:
                         self.adapter.step(action)
 
@@ -184,14 +271,18 @@ class HierarchicalSRAgent(VisualizationMixin):
                     if s_next != s or done:
                         break
 
+                # If we reseeded after termination, skip the normal bookkeeping
+                # (transition was already recorded above, s is already updated)
+                if reseeded:
+                    continue
+
                 # Update transition counts
                 self._update_transition_count(B, s, s_next, action)
 
-                # Store experience
-                # Note: done is always False during exploration to match original behavior
-                # The successor matrix learns the full transition structure without early termination
+                # Store experience for TD updates
                 reward = self._get_reward(s_next) if self.C is not None else 0
                 experiences.append([s, action, s_next, reward, False])
+                current_episode.append((s, action, s_next, reward, done))
 
                 # TD update for successor matrix
                 if len(experiences) > 1:
@@ -203,14 +294,27 @@ class HierarchicalSRAgent(VisualizationMixin):
 
                 s = s_next
 
+            # End of episode: flush to replay buffer
+            if current_episode:
+                self._store_replay_episode(current_episode)
+                current_episode = []
+
         print("\nLearning complete")
 
         # Normalize transition matrix and make goal states absorbing
         B = self.adapter.normalize_transition_matrix(B, goal_states=self.goal_states)
 
-        # For continuous environments, compute M analytically from B instead of using TD learning
-        # This handles unvisited states better by using the transition matrix structure
-        if is_continuous:
+        if self.use_replay:
+            # Bioplausible: learn M via hippocampal-style experience replay.
+            # Multiple TD passes over stored trajectories, analogous to
+            # sharp-wave ripple replay during rest (Dayan 1993, Stachenfeld 2017).
+            replay_lr = self.learning_rate / 2.0
+            n_transitions = self._replay_buffer_total
+            print(f"Running experience replay ({self.n_replay_epochs} epochs, "
+                  f"{n_transitions} transitions, mode={self.replay_mode})...")
+            self._replay_sr_updates(M, self.n_replay_epochs, replay_lr)
+        else:
+            # Analytical fallback: fast but not bioplausible (matrix inverse).
             print("Computing M analytically from B...")
             M = self.adapter.compute_successor_from_transition(B, self.gamma)
 
@@ -253,14 +357,18 @@ class HierarchicalSRAgent(VisualizationMixin):
             s_next_state = state_space.index_to_state(s_next)
             B[s_next_state[0], s_next_state[1], s_state[0], s_state[1], action] += 1
 
-    def _update_sr_td(self, M: np.ndarray, current_exp: List, next_exp: List):
+    def _update_sr_td(self, M: np.ndarray, current_exp, next_exp, lr: float = None):
         """SARSA TD update for successor matrix.
 
         Args:
             M: Successor matrix to update (modified in place)
-            current_exp: [s, a, s', r, done]
+            current_exp: [s, a, s', r, done] or tuple
             next_exp: next experience tuple
+            lr: Learning rate (default: self.learning_rate)
         """
+        if lr is None:
+            lr = self.learning_rate
+
         s1 = current_exp[0]
         s2 = current_exp[2]
         done = current_exp[4]
@@ -272,7 +380,7 @@ class HierarchicalSRAgent(VisualizationMixin):
                 td_error = I + self.gamma * I - M[s1, :]
             else:
                 td_error = I + self.gamma * M[s2, :] - M[s1, :]
-            M[s1, :] += self.learning_rate * td_error
+            M[s1, :] += lr * td_error
 
         elif M.ndim == 4:
             # Augmented: (N, K, N, K)
@@ -285,7 +393,61 @@ class HierarchicalSRAgent(VisualizationMixin):
                 td_error = I + self.gamma * I - M[s1_state[0], s1_state[1], :, :]
             else:
                 td_error = I + self.gamma * M[s2_state[0], s2_state[1], :, :] - M[s1_state[0], s1_state[1], :, :]
-            M[s1_state[0], s1_state[1], :, :] += self.learning_rate * td_error
+            M[s1_state[0], s1_state[1], :, :] += lr * td_error
+
+    # ==================== Experience Replay ====================
+
+    def _store_replay_episode(self, episode: list):
+        """Store an episode in the replay buffer with FIFO eviction."""
+        self.replay_buffer.append(episode)
+        self._replay_buffer_total += len(episode)
+
+        # Evict oldest episodes when buffer exceeds capacity
+        while self._replay_buffer_total > self.replay_buffer_size and self.replay_buffer:
+            evicted = self.replay_buffer.pop(0)
+            self._replay_buffer_total -= len(evicted)
+
+    def _replay_sr_updates(self, M: np.ndarray, n_epochs: int, lr: float):
+        """Hippocampal-style experience replay for successor matrix learning.
+
+        Replays stored trajectory episodes multiple times, applying TD updates
+        to M. Analogous to sharp-wave ripple replay during rest, where the
+        hippocampus replays stored sequences to consolidate the successor
+        representation (Dayan 1993, Stachenfeld et al. 2017).
+
+        Args:
+            M: Successor matrix to update (modified in place)
+            n_epochs: Number of complete passes through the replay buffer
+            lr: Learning rate for replay updates
+        """
+        if not self.replay_buffer:
+            print("Warning: replay buffer is empty, skipping replay")
+            return
+
+        log_interval = max(1, n_epochs // 5)
+
+        for epoch in range(n_epochs):
+            # Determine episode ordering
+            episode_indices = list(range(len(self.replay_buffer)))
+            if self.replay_mode == 'shuffle':
+                random.shuffle(episode_indices)
+
+            n_updates = 0
+            for ep_idx in episode_indices:
+                episode = self.replay_buffer[ep_idx]
+                for t in range(len(episode)):
+                    current = episode[t]
+                    # Use next transition for bootstrapping; at episode end,
+                    # use the last transition itself (terminal)
+                    nxt = episode[t + 1] if t + 1 < len(episode) else episode[t]
+                    self._update_sr_td(M, current, nxt, lr)
+                    n_updates += 1
+
+            if (epoch + 1) % log_interval == 0:
+                print(f"  Replay epoch {epoch + 1}/{n_epochs}: "
+                      f"{n_updates} updates, M norm={np.linalg.norm(M):.4f}")
+
+        print(f"Replay complete. M Frobenius norm: {np.linalg.norm(M):.4f}")
 
     # ==================== Macro State Clustering ====================
 
@@ -492,6 +654,7 @@ class HierarchicalSRAgent(VisualizationMixin):
         """Run an episode using hierarchical planning.
 
         First uses macro-level planning, then switches to micro-level.
+        If ``compile_policy()`` has been called, uses O(1) cached lookups.
 
         Args:
             max_steps: Maximum number of steps
@@ -499,6 +662,9 @@ class HierarchicalSRAgent(VisualizationMixin):
         Returns:
             Dict with episode statistics
         """
+        if self._policy_compiled:
+            return self._run_episode_hierarchical_cached(max_steps)
+
         total_steps = 0
         total_reward = 0.0
 
@@ -538,11 +704,11 @@ class HierarchicalSRAgent(VisualizationMixin):
 
             s_idx = self.adapter.get_current_state_index()
 
-            if s_idx in self.goal_states:
+            if self._is_at_goal():
                 break
 
         # Micro-level planning to reach exact goal
-        if s_idx not in self.goal_states and total_steps < max_steps:
+        if not self._is_at_goal() and total_steps < max_steps:
             steps, reward = self._run_micro_to_goal(max_steps - total_steps)
             total_steps += steps
             total_reward += reward
@@ -550,7 +716,7 @@ class HierarchicalSRAgent(VisualizationMixin):
         return {
             'steps': total_steps,
             'reward': total_reward,
-            'reached_goal': self.adapter.get_current_state_index() in self.goal_states,
+            'reached_goal': self._is_at_goal(),
             'final_state': self.adapter.get_current_state(),
         }
 
@@ -601,7 +767,7 @@ class HierarchicalSRAgent(VisualizationMixin):
         s_idx = self.adapter.get_current_state_index()
 
         while steps < max_steps:
-            if s_idx in bottleneck or s_idx in self.goal_states:
+            if s_idx in bottleneck or self._is_at_goal():
                 break
 
             action = self._select_micro_action(V)
@@ -641,7 +807,7 @@ class HierarchicalSRAgent(VisualizationMixin):
         reward = 0.0
         s_idx = self.adapter.get_current_state_index()
 
-        while steps < max_steps and s_idx not in self.goal_states:
+        while steps < max_steps and not self._is_at_goal():
             action = self._select_micro_action(V)
             self.current_state = self.adapter.step(action)
             self.state_history.append(self.current_state.copy())
@@ -659,7 +825,14 @@ class HierarchicalSRAgent(VisualizationMixin):
         return steps, reward
 
     def _select_micro_action(self, V: np.ndarray) -> int:
-        """Select best micro action based on value function.
+        """Select best micro action based on expected value.
+
+        For each action, computes the expected next-state value under the
+        learned transition distribution: E[V(s')] = B(:,s,a) · V.
+
+        This properly handles stochastic transitions (e.g. Acrobot) where
+        the argmax of the transition distribution might be the same state
+        for all actions, masking real value differences.
 
         Args:
             V: Value function (flat array)
@@ -669,14 +842,16 @@ class HierarchicalSRAgent(VisualizationMixin):
         """
         s_onehot = self.current_state
 
-        # Compute values for each action
+        # Compute expected value for each action
         values = []
         for action in range(self.adapter.n_actions):
-            s_next = self.adapter.multiply_B_s(self.B, s_onehot, action)
-            next_idx = self.adapter.onehot_to_index(s_next)
-            values.append(V[next_idx])
+            s_next_dist = self.adapter.multiply_B_s(self.B, s_onehot, action)
+            # Flatten for augmented state spaces (e.g., key gridworld: shape (N,2))
+            s_flat = s_next_dist.flatten('F') if s_next_dist.ndim > 1 else s_next_dist
+            expected_value = float(s_flat @ V)
+            values.append(expected_value)
 
-        # Select best action that actually changes state
+        # Select best action that actually changes expected state
         sorted_actions = np.argsort(values)[::-1]
 
         for action in sorted_actions:
@@ -690,19 +865,24 @@ class HierarchicalSRAgent(VisualizationMixin):
     def run_episode_flat(self, max_steps: int = 200) -> Dict[str, Any]:
         """Run an episode using only micro-level (flat) planning.
 
+        If ``compile_policy()`` has been called, uses O(1) cached lookups.
+
         Args:
             max_steps: Maximum number of steps
 
         Returns:
             Dict with episode statistics
         """
+        if self._policy_compiled:
+            return self._run_episode_flat_cached(max_steps)
+
         V = self.adapter.multiply_M_C(self.M, self.C)
 
         steps = 0
         reward = 0.0
         s_idx = self.adapter.get_current_state_index()
 
-        while steps < max_steps and s_idx not in self.goal_states:
+        while steps < max_steps and not self._is_at_goal():
             action = self._select_micro_action(V)
             self.current_state = self.adapter.step(action)
             self.state_history.append(self.current_state.copy())
@@ -720,6 +900,314 @@ class HierarchicalSRAgent(VisualizationMixin):
         return {
             'steps': steps,
             'reward': reward,
-            'reached_goal': s_idx in self.goal_states,
+            'reached_goal': self._is_at_goal(),
             'final_state': self.adapter.get_current_state(),
         }
+
+    # ==================== Policy Compilation ====================
+
+    def compile_policy(self):
+        """Precompute state→action lookup tables for O(1) inference.
+
+        After calling this, ``run_episode_hierarchical`` and ``run_episode_flat``
+        will use cached dictionary lookups instead of per-step matrix
+        multiplications.  Call again (or ``set_goal``) to invalidate.
+
+        Requires that ``learn_environment()`` has been called first.
+        """
+        if self.B is None or self.M is None:
+            raise RuntimeError("Must call learn_environment() before compile_policy()")
+
+        print("Compiling policy tables...")
+
+        # 1. Goal policy: best action toward final goal for every state
+        V_goal = self.adapter.multiply_M_C(self.M, self.C)
+        self._goal_policy = self._compute_policy_table(V_goal)
+
+        # 2. Bottleneck policies: best action to reach each bottleneck set
+        self._bottleneck_policies = {}
+        if self.bottleneck_states:
+            for (src, tgt), bottleneck in self.bottleneck_states.items():
+                C_temp = self.adapter.create_goal_prior(
+                    bottleneck, reward=10.0, default_cost=0.0
+                )
+                V_bn = self.adapter.multiply_M_C(self.M, C_temp)
+                self._bottleneck_policies[(src, tgt)] = self._compute_policy_table(V_bn)
+
+        # 3. Macro policy: best macro action for each macro state
+        V_macro = self.M_macro @ self.C_macro
+        self._macro_policy = {}
+        for s_macro in range(self.n_clusters):
+            best = self._select_macro_action(s_macro, V_macro)
+            self._macro_policy[s_macro] = best  # int or None
+
+        self._policy_compiled = True
+        print(
+            f"Policy compiled: {len(self._goal_policy)} micro states, "
+            f"{len(self._bottleneck_policies)} bottleneck policies, "
+            f"{len(self._macro_policy)} macro states"
+        )
+
+    def _compute_policy_table(self, V: np.ndarray) -> dict:
+        """Precompute best action for every state given value function *V*.
+
+        Uses the same expected-value + state-change tie-breaking logic as
+        ``_select_micro_action``.
+
+        Args:
+            V: Value function (flat 1D or multi-dim for augmented spaces)
+
+        Returns:
+            Dict mapping ``state_idx`` → ``best_action`` (int)
+        """
+        policy = {}
+        n_states = self.adapter.n_states
+        V_flat = V.ravel()
+
+        for s_idx in range(n_states):
+            s_onehot = self.adapter.index_to_onehot(s_idx)
+
+            # Expected value under each action's transition distribution
+            values = []
+            for action in range(self.adapter.n_actions):
+                s_next_dist = self.adapter.multiply_B_s(self.B, s_onehot, action)
+                expected_value = float(np.dot(s_next_dist.ravel(), V_flat))
+                values.append(expected_value)
+
+            # Best action that actually changes expected state
+            sorted_actions = np.argsort(values)[::-1]
+            best = int(sorted_actions[0])
+            for action in sorted_actions:
+                s_next = self.adapter.multiply_B_s(self.B, s_onehot, int(action))
+                if not np.allclose(s_next, s_onehot):
+                    best = int(action)
+                    break
+
+            policy[s_idx] = best
+
+        return policy
+
+    # ==================== Cached Episode Execution ====================
+
+    def _run_episode_hierarchical_cached(self, max_steps: int) -> Dict[str, Any]:
+        """Run hierarchical episode using precompiled policy tables (O(1) per step)."""
+        total_steps = 0
+        total_reward = 0.0
+
+        goal_macro_states = set()
+        for gs in self.goal_states:
+            if gs in self.micro_to_macro:
+                goal_macro_states.add(self.micro_to_macro[gs])
+
+        # Hierarchical phase: navigate through macro states
+        while total_steps < max_steps:
+            s_idx = self.adapter.get_current_state_index()
+            if s_idx not in self.micro_to_macro:
+                break
+            s_macro = self.micro_to_macro[s_idx]
+            if s_macro in goal_macro_states:
+                break
+
+            best_macro = self._macro_policy.get(s_macro)
+            if best_macro is None:
+                break
+            target_macro = self.adj_list[s_macro][best_macro]
+
+            # Navigate to bottleneck using cached bottleneck policy
+            bn_policy = self._bottleneck_policies.get((s_macro, target_macro))
+            if bn_policy is None:
+                break
+            bottleneck_set = set(
+                self.bottleneck_states.get((s_macro, target_macro), [])
+            )
+
+            while total_steps < max_steps:
+                s_idx = self.adapter.get_current_state_index()
+                if s_idx in bottleneck_set or self._is_at_goal():
+                    break
+
+                action = bn_policy.get(s_idx, 0)  # O(1) lookup
+                self.current_state = self.adapter.step(action)
+                self.state_history.append(self.current_state.copy())
+                self.action_history.append(action)
+                total_steps += 1
+
+                s_idx = self.adapter.get_current_state_index()
+                total_reward += self._get_reward(s_idx)
+
+                # Check if we've reached the target macro state
+                if s_idx in self.micro_to_macro:
+                    if self.micro_to_macro[s_idx] == target_macro:
+                        break
+
+            if self._is_at_goal():
+                break
+
+        # Micro phase: navigate to exact goal using cached goal policy
+        while total_steps < max_steps and not self._is_at_goal():
+            s_idx = self.adapter.get_current_state_index()
+            action = self._goal_policy.get(s_idx, 0)  # O(1) lookup
+            self.current_state = self.adapter.step(action)
+            self.state_history.append(self.current_state.copy())
+            self.action_history.append(action)
+            total_steps += 1
+
+            s_idx = self.adapter.get_current_state_index()
+            total_reward += self._get_reward(s_idx)
+
+        return {
+            'steps': total_steps,
+            'reward': total_reward,
+            'reached_goal': self._is_at_goal(),
+            'final_state': self.adapter.get_current_state(),
+        }
+
+    def _run_episode_flat_cached(self, max_steps: int) -> Dict[str, Any]:
+        """Run flat episode using precompiled goal policy table (O(1) per step)."""
+        steps = 0
+        reward = 0.0
+
+        while steps < max_steps and not self._is_at_goal():
+            s_idx = self.adapter.get_current_state_index()
+            action = self._goal_policy.get(s_idx, 0)  # O(1) lookup
+            self.current_state = self.adapter.step(action)
+            self.state_history.append(self.current_state.copy())
+            self.action_history.append(action)
+
+            s_idx = self.adapter.get_current_state_index()
+            reward += self._get_reward(s_idx)
+            steps += 1
+
+        return {
+            'steps': steps,
+            'reward': reward,
+            'reached_goal': self._is_at_goal(),
+            'final_state': self.adapter.get_current_state(),
+        }
+
+    # ==================== Policy Save / Load ====================
+
+    def save_compiled_policy(self, path: str):
+        """Save compiled policy tables to an ``.npz`` file for deployment.
+
+        The saved file contains only the policy lookup tables and structural
+        metadata (adjacency, bottleneck states, cluster assignments).  No B or
+        M matrices are needed — the file is typically ~100× smaller.
+
+        Args:
+            path: File path (e.g. ``"acrobot_policy.npz"``)
+        """
+        import json
+
+        if not self._policy_compiled:
+            raise RuntimeError("Must call compile_policy() before save")
+
+        data = {
+            'goal_policy_keys': np.array(list(self._goal_policy.keys())),
+            'goal_policy_vals': np.array(list(self._goal_policy.values())),
+            'macro_policy_keys': np.array(list(self._macro_policy.keys())),
+            'macro_policy_vals': np.array(
+                [v if v is not None else -1 for v in self._macro_policy.values()]
+            ),
+            'goal_states': np.array(self.goal_states),
+            'n_clusters': np.array(self.n_clusters),
+            'micro_to_macro_keys': np.array(list(self.micro_to_macro.keys())),
+            'micro_to_macro_vals': np.array(list(self.micro_to_macro.values())),
+        }
+
+        # Save each bottleneck policy
+        for (src, tgt), policy in self._bottleneck_policies.items():
+            data[f'bn_{src}_{tgt}_keys'] = np.array(list(policy.keys()))
+            data[f'bn_{src}_{tgt}_vals'] = np.array(list(policy.values()))
+
+        # Save adjacency and structural metadata as JSON
+        # Convert numpy ints to Python ints for JSON serialization
+        def _to_python(obj):
+            if isinstance(obj, (np.integer,)):
+                return int(obj)
+            if isinstance(obj, (np.floating,)):
+                return float(obj)
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, dict):
+                return {_to_python(k): _to_python(v) for k, v in obj.items()}
+            if isinstance(obj, (list, tuple)):
+                return [_to_python(x) for x in obj]
+            if isinstance(obj, set):
+                return [_to_python(x) for x in obj]
+            return obj
+
+        metadata = _to_python({
+            'adj_list': {str(k): v for k, v in self.adj_list.items()},
+            'bottleneck_states': {
+                f"{k[0]}_{k[1]}": v for k, v in self.bottleneck_states.items()
+            },
+            'bottleneck_policy_keys': [
+                f"{s}_{t}" for (s, t) in self._bottleneck_policies.keys()
+            ],
+        })
+        data['metadata_json'] = np.array([json.dumps(metadata)])
+
+        np.savez_compressed(path, **data)
+        print(f"Saved compiled policy to {path}")
+
+    @classmethod
+    def load_compiled_policy(cls, path: str, adapter: 'BaseEnvironmentAdapter') -> 'HierarchicalSRAgent':
+        """Load a compiled policy for inference-only use.
+
+        No B or M matrices are loaded — only the precomputed policy lookup
+        tables and structural metadata.
+
+        Args:
+            path: Path to ``.npz`` file created by ``save_compiled_policy``
+            adapter: An environment adapter (needed for ``step`` / ``reset``)
+
+        Returns:
+            A ``HierarchicalSRAgent`` with compiled policy ready for execution
+        """
+        import json
+
+        data = np.load(path, allow_pickle=True)
+
+        agent = cls(adapter, n_clusters=int(data['n_clusters']))
+
+        # Restore goal policy
+        agent._goal_policy = dict(zip(
+            data['goal_policy_keys'].tolist(),
+            data['goal_policy_vals'].tolist(),
+        ))
+
+        # Restore macro policy
+        macro_keys = data['macro_policy_keys'].tolist()
+        macro_vals = data['macro_policy_vals'].tolist()
+        agent._macro_policy = {
+            k: (v if v != -1 else None) for k, v in zip(macro_keys, macro_vals)
+        }
+
+        # Restore goal states and micro_to_macro
+        agent.goal_states = data['goal_states'].tolist()
+        agent.micro_to_macro = dict(zip(
+            data['micro_to_macro_keys'].tolist(),
+            data['micro_to_macro_vals'].tolist(),
+        ))
+
+        # Restore structural metadata
+        metadata = json.loads(str(data['metadata_json'][0]))
+        agent.adj_list = {int(k): v for k, v in metadata['adj_list'].items()}
+
+        agent.bottleneck_states = {}
+        for key_str, states in metadata['bottleneck_states'].items():
+            s, t = key_str.split('_')
+            agent.bottleneck_states[(int(s), int(t))] = states
+
+        # Restore bottleneck policies
+        agent._bottleneck_policies = {}
+        for key_str in metadata['bottleneck_policy_keys']:
+            s, t = key_str.split('_')
+            keys = data[f'bn_{s}_{t}_keys'].tolist()
+            vals = data[f'bn_{s}_{t}_vals'].tolist()
+            agent._bottleneck_policies[(int(s), int(t))] = dict(zip(keys, vals))
+
+        agent._policy_compiled = True
+        print(f"Loaded compiled policy from {path}: {len(agent._goal_policy)} states")
+        return agent

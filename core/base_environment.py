@@ -225,6 +225,22 @@ class BaseEnvironmentAdapter(ABC):
         """
         pass
 
+    # ==================== Terminal Condition ====================
+
+    def is_terminal(self) -> Optional[bool]:
+        """Check if the current continuous state is terminal.
+
+        For environments with discretized continuous state spaces (e.g. Acrobot,
+        MountainCar), this provides a ground-truth terminal check using the
+        continuous state, which is more accurate than checking discrete goal bins.
+
+        Returns:
+            True/False if the adapter can evaluate termination, or
+            None if no continuous terminal check is available (default).
+            When None, the agent falls back to discrete goal_states membership.
+        """
+        return None
+
     # ==================== Walls/Obstacles ====================
 
     def get_wall_indices(self) -> List[int]:

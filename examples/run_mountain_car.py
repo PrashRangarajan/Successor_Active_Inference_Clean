@@ -92,16 +92,16 @@ def run_mountain_car_example():
     print("VISUALIZATION")
     print("="*50)
 
-    agent.view_matrices(save_dir="figures/mountain_car/matrices", learned=True)
-    print("  Saved matrix visualizations to figures/mountain_car/matrices/")
+    agent.view_matrices(save_dir="figures/mountaincar/matrices", learned=True)
+    print("  Saved matrix visualizations to figures/mountaincar/matrices/")
 
     # Record a video of the flat policy
     print("\n" + "="*50)
     print("RECORDING VIDEO")
     print("="*50)
 
-    os.makedirs("figures/mountain_car", exist_ok=True)
-    video_path = "figures/mountain_car/mountain_car_episode.mp4"
+    os.makedirs("figures/mountaincar", exist_ok=True)
+    video_path = "figures/mountaincar/mountain_car_episode.mp4"
 
     frames = run_episode_with_video(agent, adapter, init_state, max_steps=500)
 
