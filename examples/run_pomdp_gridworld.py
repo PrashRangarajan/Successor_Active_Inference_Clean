@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from unified_env import StandardGridworld as SR_Gridworld
 from environments.pomdp_gridworld import POMDPGridworldAdapter
+from environments.gridworld import get_layout, AVAILABLE_LAYOUTS
 from core.hierarchical_agent import HierarchicalSRAgent
 
 
@@ -89,7 +90,7 @@ def visualize_pomdp_episode_comparison(adapter, agent, grid_size):
     print("Episode trajectory comparison saved to figures/pomdp_gridworld/episode_trajectory_comparison.png")
 
 
-def run_pomdp_gridworld_example():
+def run_pomdp_gridworld_example(layout_name="fourrooms"):
     """Run hierarchical active inference on a POMDP gridworld."""
 
     print("=" * 50)
@@ -98,18 +99,22 @@ def run_pomdp_gridworld_example():
 
     # ==================== Environment Setup ====================
     grid_size = 9
-    n_clusters = 5
 
-    # Use simpler setup: no walls, just some noisy states
-    walls = []  # No walls for simplicity
+    layout = get_layout(layout_name, grid_size)
+    n_clusters = layout.n_clusters
+    walls = layout.walls
+    wall_set = set(walls)
 
-    # Noisy states in the middle of the grid
+    # Noisy states: top-right quadrant is heavily noisy.
+    # Agent starts at (0,0), goal at bottom-right. Direct route goes through
+    # top-right area. With high noise there, the EFE-aware agent should prefer
+    # the longer route through cleaner areas.
+    mid = grid_size // 2
     hallway_states = [
-        (4, 4),  # center
-        (3, 4),
-        (5, 4),
-        (4, 3),
-        (4, 5),
+        (x, y)
+        for x in range(mid + 1, grid_size)
+        for y in range(mid)
+        if (x, y) not in wall_set
     ]
 
     # Create environment
@@ -130,9 +135,9 @@ def run_pomdp_gridworld_example():
     adapter = POMDPGridworldAdapter(
         env,
         grid_size=grid_size,
-        noise_level=0.2,  # 20% noise: P(correct obs) = 0.8, demonstrates POMDP behavior
-        noisy_states=hallway_indices,  # Extra noise in hallways
-        noise_spread=3.0,  # How spread out the hallway noise is (gamma scale)
+        noise_level=0.3,  # 30% base noise — harder POMDP
+        noisy_states=hallway_indices,  # Extra noise in top-right room
+        noise_spread=3.0,  # Noisy room is 3x noisier than base
         use_true_state_for_learning=False  # Full POMDP mode
     )
 
@@ -144,7 +149,7 @@ def run_pomdp_gridworld_example():
 
     # ==================== Agent Setup ====================
     init_loc = (0, 0)
-    goal_loc = (grid_size - 1, grid_size - 1)
+    goal_loc = layout.default_goal
     goal_states = adapter.get_goal_states(goal_loc)
 
     print(f"\nInitial location: {init_loc}")
@@ -152,7 +157,7 @@ def run_pomdp_gridworld_example():
     print(f"Goal state index: {goal_states}")
 
     # Create goal prior with information gain term
-    beta = 0.1  # Weight for observation entropy
+    beta = 1.0  # Weight for observation entropy — strong enough to reroute around noisy room
     C = adapter.create_goal_prior_with_info_gain(
         goal_states,
         reward=100.0,
@@ -195,10 +200,13 @@ def run_pomdp_gridworld_example():
     print("=" * 50)
 
     # POMDP environment visualizations
-    agent.visualize_observation_entropy()
-    agent.visualize_observation_model()
-    agent.visualize_noise_zones(init_loc=init_loc, goal_loc=goal_loc)
-    agent.visualize_pomdp_value_comparison(beta=beta)
+    fig_dir = "figures/pomdp_gridworld"
+    agent.visualize_observation_entropy(save_path=f"{fig_dir}/observation_entropy.png")
+    agent.visualize_observation_model(save_dir=fig_dir)
+    agent.visualize_noise_zones(save_path=f"{fig_dir}/noise_zones.png",
+                                init_loc=init_loc, goal_loc=goal_loc)
+    agent.visualize_pomdp_value_comparison(save_path=f"{fig_dir}/value_comparison.png",
+                                           beta=beta)
 
     # Standard agent visualizations
     agent.visualize_clusters(save_dir="figures/pomdp_gridworld/clustering")
@@ -226,8 +234,13 @@ def run_pomdp_gridworld_example():
     print(f"  Believed final state: {result['final_state']}")
     print(f"  True final state: {adapter.get_true_state()}")
 
+    # Generate video of hierarchical episode trajectory
+    agent.show_video(save_path="figures/pomdp_gridworld/episode_video_hier.mp4",
+                     init_loc=init_loc, goal_loc=goal_loc)
+    print("  Saved video to figures/pomdp_gridworld/episode_video_hier.mp4")
+
     # Visualize belief trajectory for hierarchical episode
-    agent.visualize_belief_trajectory()
+    agent.visualize_belief_trajectory(save_dir="figures/pomdp_gridworld")
 
     # Visualize episode trajectory comparison
     visualize_pomdp_episode_comparison(adapter, agent, grid_size)
@@ -284,10 +297,18 @@ def run_pomdp_gridworld_example():
     n_errors = sum(1 for t, b in zip(true_states, belief_states) if t != b)
     print(f"\nBelief accuracy: {len(true_states) - n_errors}/{len(true_states)} " +
           f"({100 * (len(true_states) - n_errors) / len(true_states):.1f}%)")
-    print(f"Note: Errors occur due to noisy observations - this is expected in a POMDP!")
+    # print(f"Note: Errors occur due to noisy observations - this is expected in a POMDP!")
 
     return agent, adapter
 
 
 if __name__ == "__main__":
-    run_pomdp_gridworld_example()
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="POMDP Gridworld - Hierarchical Active Inference"
+    )
+    parser.add_argument("--layout", type=str, default="fourrooms",
+                        choices=AVAILABLE_LAYOUTS,
+                        help="Wall layout (default: fourrooms)")
+    args = parser.parse_args()
+    run_pomdp_gridworld_example(layout_name=args.layout)

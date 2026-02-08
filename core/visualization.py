@@ -250,7 +250,13 @@ class VisualizationMixin:
         os.makedirs(save_dir, exist_ok=True)
 
         if not hasattr(self.adapter, 'grid_size'):
-            print("Cluster visualization requires grid-based environment")
+            # Check for 2D binned continuous state space (Mountain Car, Pendulum)
+            if (hasattr(self.adapter, 'state_space') and
+                    hasattr(self.adapter.state_space, 'n_bins_per_dim') and
+                    len(self.adapter.state_space.n_bins_per_dim) == 2):
+                self._visualize_clusters_2d_binned(save_dir)
+                return
+            print("Cluster visualization requires grid-based or 2D binned environment")
             return
 
         grid_size = self.adapter.grid_size
@@ -361,6 +367,484 @@ class VisualizationMixin:
         plt.title('Micro States Spectral Embedding (Augmented)')
         plt.savefig(f'{save_dir}/macro_state_viz.png', bbox_inches='tight')
         plt.close()
+
+    def _visualize_clusters_2d_binned(self, save_dir: str):
+        """Visualize clusters for 2D binned continuous state spaces.
+
+        Creates a heatmap showing cluster assignments over the 2D discretized
+        state space (e.g., position × velocity for Mountain Car, θ × ω for
+        Pendulum).  When the adapter provides ``get_bin_edges()``, the axes
+        are labelled with physical coordinates; otherwise plain bin indices.
+        """
+        bins = self.adapter.state_space.n_bins_per_dim
+        n_states = self.adapter.n_states
+
+        # Build labels array
+        labels = np.ones(n_states, dtype=int) * self.n_clusters  # default = "unassigned"
+        for micro_idx, macro_idx in self.micro_to_macro.items():
+            labels[micro_idx] = macro_idx
+
+        # Reshape to 2D grid (row-major ordering matches BinnedContinuousStateSpace)
+        labels_grid = labels.reshape(bins[0], bins[1])
+
+        # Get axis labels from adapter if available
+        if hasattr(self.adapter, 'get_dimension_labels'):
+            dim0_label, dim1_label = self.adapter.get_dimension_labels()
+        else:
+            dim0_label, dim1_label = "Dim 0", "Dim 1"
+
+        # Get physical extent from bin edges (if available)
+        has_edges = hasattr(self.adapter, 'get_bin_edges')
+        if has_edges:
+            edges0, edges1 = self.adapter.get_bin_edges()
+            extent = [edges0[0], edges0[-1], edges1[0], edges1[-1]]
+        else:
+            extent = None
+
+        # Get bin center values for tick labels (if available)
+        has_centers = hasattr(self.adapter, 'get_bin_centers')
+        if has_centers:
+            centers0, centers1 = self.adapter.get_bin_centers()
+
+        plt.figure()
+        im = plt.imshow(
+            labels_grid.T,
+            aspect='auto',
+            origin='lower',
+            extent=extent,
+            interpolation='nearest',
+        )
+
+        # Build legend from the colormap used by imshow
+        colours = im.cmap(im.norm(np.unique(labels_grid)))
+        n_actual = len(np.unique(labels_grid))
+        # Exclude unassigned label from the legend
+        n_legend = n_actual - 1 if self.n_clusters in labels else n_actual
+        patches = [mpatches.Patch(color=colours[i], label=f'{i}')
+                   for i in range(n_legend)]
+        plt.legend(handles=patches)
+
+        # Custom tick labels showing physical bin centers
+        if has_centers:
+            tick_pos0 = np.linspace(
+                extent[0] if extent else 0,
+                extent[1] if extent else bins[0] - 1,
+                bins[0],
+            )
+            tick_pos1 = np.linspace(
+                extent[2] if extent else 0,
+                extent[3] if extent else bins[1] - 1,
+                bins[1],
+            )
+            plt.xticks(ticks=tick_pos0, labels=np.round(centers0, 3), fontsize=10)
+            plt.yticks(ticks=tick_pos1, labels=np.round(centers1, 3), fontsize=10)
+
+        plt.xlabel(dim0_label, fontsize=12)
+        plt.ylabel(dim1_label, fontsize=12)
+        plt.title("Macro state clusters", fontsize=20)
+        plt.savefig(f"{save_dir}/Macro_s.png", format="png", bbox_inches='tight')
+        plt.close()
+        print(f"  Saved cluster heatmap to {save_dir}/Macro_s.png")
+
+        # Also plot spectral embedding if available
+        if self.spectral_positions is not None:
+            colours_arr = np.array(colours[:n_legend])
+            self._plot_spectral_embedding(save_dir, colours_arr)
+
+    # ==================== Continuous-Space Trajectory Visualization ========
+
+    def plot_trajectory_with_macro_states(
+        self,
+        positions: List[float],
+        velocities: List[float],
+        save_path: str = "figures/trajectory_macro.png",
+    ):
+        """Plot a 2D phase-space trajectory colored by macro state membership.
+
+        Works for any 2D binned continuous environment (Mountain Car, Pendulum).
+        Each trajectory point is colored according to its macro state cluster,
+        using the same colormap as the cluster heatmap.
+
+        Args:
+            positions: Continuous dim-0 values (e.g. position / angle) per step.
+            velocities: Continuous dim-1 values (e.g. velocity / angular vel) per step.
+            save_path: Path to save the figure.
+        """
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+        if hasattr(self.adapter, 'get_dimension_labels'):
+            dim0_label, dim1_label = self.adapter.get_dimension_labels()
+        else:
+            dim0_label, dim1_label = "Dim 0", "Dim 1"
+
+        num_points = len(positions)
+        viridis_cmap = plt.get_cmap("viridis")
+        macro_colors = [viridis_cmap(i / max(self.n_clusters - 1, 1))
+                        for i in range(self.n_clusters)]
+
+        plt.figure(figsize=(6, 5))
+
+        # Color each point by its macro state
+        for i in range(num_points):
+            obs = np.array([positions[i], velocities[i]])
+            discrete = self.adapter.discretize_obs(obs)
+            s_idx = self.adapter.state_space.state_to_index(discrete)
+            macro = self.micro_to_macro.get(s_idx, 0)
+            plt.plot(positions[i], velocities[i],
+                     marker="o", markersize=4, color=macro_colors[macro])
+
+        # Gray connecting line
+        plt.plot(positions, velocities, linewidth=1, color="gray", alpha=0.5)
+
+        # Legend entries for each cluster
+        for i in range(self.n_clusters):
+            plt.scatter([], [], color=macro_colors[i], label=f'{i}',
+                        marker="o", s=40, edgecolor='black')
+
+        # Start / End markers
+        s0_obs = np.array([positions[0], velocities[0]])
+        s0_disc = self.adapter.discretize_obs(s0_obs)
+        s0_macro = self.micro_to_macro.get(
+            self.adapter.state_space.state_to_index(s0_disc), 0)
+        plt.scatter(positions[0], velocities[0],
+                    color=macro_colors[s0_macro], label="Start",
+                    marker="o", s=60, edgecolor='black', linewidths=1.5)
+
+        sN_obs = np.array([positions[-1], velocities[-1]])
+        sN_disc = self.adapter.discretize_obs(sN_obs)
+        sN_macro = self.micro_to_macro.get(
+            self.adapter.state_space.state_to_index(sN_disc), 0)
+        plt.scatter(positions[-1], velocities[-1],
+                    color=macro_colors[sN_macro], label="End",
+                    marker="o", s=60, edgecolor='black', linewidths=1.5)
+
+        plt.xlabel(dim0_label)
+        plt.ylabel(dim1_label)
+        plt.title("Trajectory with Macro States")
+        plt.legend(loc="best")
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=150)
+        plt.close()
+        print(f"  Saved macro-state trajectory to {save_path}")
+
+    def plot_trajectory_with_actions(
+        self,
+        positions: List[float],
+        velocities: List[float],
+        actions: List[int],
+        save_path: str = "figures/trajectory_actions.png",
+    ):
+        """Plot phase-space trajectory colored by action taken at each step.
+
+        Args:
+            positions: List of position values along the trajectory.
+            velocities: List of velocity values along the trajectory.
+            actions: List of action indices (one per decision step).
+            save_path: Output file path.
+        """
+        import matplotlib.colors as mcolors
+
+        # Get axis labels from adapter
+        if hasattr(self.adapter, 'get_dimension_labels'):
+            dim0_label, dim1_label = self.adapter.get_dimension_labels()
+        else:
+            dim0_label, dim1_label = "Dim 0", "Dim 1"
+
+        # Get action labels from adapter (or fall back to numeric)
+        if hasattr(self.adapter, 'get_action_labels'):
+            action_labels = self.adapter.get_action_labels()
+        else:
+            n_act = self.adapter.n_actions
+            action_labels = [str(i) for i in range(n_act)]
+
+        n_actions = len(action_labels)
+
+        # Trim to matched lengths (actions has one fewer entry than positions)
+        n = min(len(positions), len(velocities), len(actions))
+        pos = np.asarray(positions[:n], dtype=float)
+        vel = np.asarray(velocities[:n], dtype=float)
+        act = np.asarray(actions[:n], dtype=int)
+
+        # Discrete colormap: one distinct colour per action
+        base_cmap = plt.get_cmap("tab10")
+        colors = [base_cmap(i) for i in range(n_actions)]
+        cmap = mcolors.ListedColormap(colors[:n_actions])
+        bounds = np.arange(-0.5, n_actions, 1)
+        norm = mcolors.BoundaryNorm(bounds, cmap.N)
+
+        plt.figure(figsize=(8, 6))
+
+        # Gray connecting line
+        plt.plot(pos, vel, linewidth=0.8, color="gray", alpha=0.4)
+
+        # Scatter colored by action
+        scatter = plt.scatter(pos, vel, c=act, cmap=cmap, norm=norm, s=18,
+                              edgecolors='none')
+
+        # Legend with action labels
+        handles = [
+            plt.Line2D([0], [0], marker='o', color='w',
+                       markerfacecolor=colors[i], markersize=8,
+                       label=action_labels[i])
+            for i in range(n_actions)
+        ]
+        plt.legend(handles=handles, title="Action", loc="best")
+
+        # Start / End markers
+        plt.scatter(pos[0], vel[0], s=80, marker='o', facecolors='none',
+                    edgecolors='black', linewidths=2, label='Start', zorder=5)
+        plt.scatter(pos[-1], vel[-1], s=80, marker='s', facecolors='none',
+                    edgecolors='black', linewidths=2, label='End', zorder=5)
+
+        plt.xlabel(dim0_label, fontsize=12)
+        plt.ylabel(dim1_label, fontsize=12)
+        plt.title("Trajectory with Actions")
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=150)
+        plt.close()
+        print(f"  Saved action trajectory to {save_path}")
+
+    def plot_stage_state_diagram(
+        self,
+        frames: List[np.ndarray],
+        positions: List[float],
+        velocities: List[float],
+        stage_idx: Optional[List[int]] = None,
+        save_path: str = "figures/stage_diagram.png",
+        annotate_state: bool = True,
+    ):
+        """Create a composite figure linking environment snapshots to phase-space states.
+
+        Top row:  rendered frames at selected stages labelled (a), (b), (c), ...
+        Bottom:   phase plot (position vs velocity) with selected stages highlighted.
+
+        Args:
+            frames: RGB frames from env.render(), one per timestep.
+            positions: Continuous dim-0 value per timestep.
+            velocities: Continuous dim-1 value per timestep.
+            stage_idx: Indices into the trajectory to snapshot.
+                       If None, auto-selects [start, valley/extremum, goal/end].
+            save_path: Output PNG path.
+            annotate_state: If True, overlay coordinate text on each snapshot.
+        """
+        from matplotlib.gridspec import GridSpec
+
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+        if hasattr(self.adapter, 'get_dimension_labels'):
+            dim0_label, dim1_label = self.adapter.get_dimension_labels()
+        else:
+            dim0_label, dim1_label = "Dim 0", "Dim 1"
+
+        T = len(positions)
+        pos = np.asarray(positions, dtype=float)
+        vel = np.asarray(velocities, dtype=float)
+
+        # Auto-select stages: start, extremum of dim-0, end
+        if stage_idx is None:
+            stage_idx = [0]
+            # Find the extremum (min for Mountain Car, max or min for others)
+            extremum_idx = int(np.argmin(pos))
+            if extremum_idx not in (0, T - 1):
+                stage_idx.append(extremum_idx)
+            stage_idx.append(T - 1)
+        stage_idx = [int(i) for i in stage_idx if 0 <= int(i) < T]
+        if len(stage_idx) == 0:
+            stage_idx = [0]
+
+        n = len(stage_idx)
+        fig = plt.figure(figsize=(4 * n, 7.5))
+        gs = GridSpec(2, n, height_ratios=[1, 1.8], hspace=0.25, wspace=0.05)
+
+        # ---- Snapshot frames (top row) ----
+        for j, idx in enumerate(stage_idx):
+            ax_img = fig.add_subplot(gs[0, j])
+            if idx < len(frames) and frames[idx] is not None:
+                ax_img.imshow(frames[idx])
+            ax_img.axis("off")
+            ax_img.set_title(f"({chr(97 + j)}) t={idx}", fontsize=14)
+
+            if annotate_state:
+                ax_img.text(
+                    0.02, 0.95,
+                    f"x={pos[idx]:.3f}\nv={vel[idx]:.3f}",
+                    transform=ax_img.transAxes, fontsize=12, va="top",
+                    bbox=dict(boxstyle="round", alpha=0.6),
+                )
+
+        # ---- Phase plot (bottom, spanning all columns) ----
+        ax_phase = fig.add_subplot(gs[1, :])
+        t = np.arange(T)
+        ax_phase.scatter(pos, vel, c=t, s=18, cmap="plasma")
+        ax_phase.plot(pos, vel, linewidth=1, color="gray", alpha=0.4)
+
+        ax_phase.set_xlabel(dim0_label)
+        ax_phase.set_ylabel(dim1_label)
+        ax_phase.set_title("Trajectory in state space")
+
+        # Highlight chosen stages
+        for j, idx in enumerate(stage_idx):
+            ax_phase.scatter(pos[idx], vel[idx], s=160, facecolors="none",
+                             linewidths=3, edgecolors="black")
+            ax_phase.text(pos[idx], vel[idx], f"  ({chr(97 + j)})",
+                          fontsize=14, va="center")
+
+        # Start / end markers
+        ax_phase.scatter(pos[0], vel[0], s=70, marker="o", edgecolors="black")
+        ax_phase.scatter(pos[-1], vel[-1], s=70, marker="o", edgecolors="black")
+        ax_phase.grid(True, alpha=0.3)
+
+        plt.savefig(save_path, dpi=200, bbox_inches='tight')
+        plt.close(fig)
+        print(f"  Saved stage diagram to {save_path}")
+        return save_path
+
+    def generate_combined_video(
+        self,
+        frames: List[np.ndarray],
+        positions: List[float],
+        velocities: List[float],
+        save_path: str = "figures/combined_vertical.mp4",
+        fps: int = 30,
+    ):
+        """Generate a vertically stacked video: environment render (top) + animated trajectory (bottom).
+
+        The bottom panel shows a phase-space trajectory that grows over time,
+        colored by macro state membership.  This produces the same style as the
+        legacy ``mountain_car_combined_vertical.mp4``.
+
+        Args:
+            frames: RGB frames from env.render(), one per decision step.
+            positions: Continuous dim-0 values per decision step.
+            velocities: Continuous dim-1 values per decision step.
+            save_path: Output MP4 path.
+            fps: Frames per second for the output video.
+        """
+        from matplotlib.collections import LineCollection
+        from PIL import Image as PILImage
+        from io import BytesIO
+        import imageio
+
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+        if hasattr(self.adapter, 'get_dimension_labels'):
+            dim0_label, dim1_label = self.adapter.get_dimension_labels()
+        else:
+            dim0_label, dim1_label = "Dim 0", "Dim 1"
+
+        pos = np.asarray(positions, dtype=float)
+        vel = np.asarray(velocities, dtype=float)
+        T = len(pos)
+
+        # Compute macro state per point
+        viridis_cmap = plt.get_cmap("viridis")
+        macro_colors = [viridis_cmap(i / max(self.n_clusters - 1, 1))
+                        for i in range(self.n_clusters)]
+
+        macro_states = []
+        for i in range(T):
+            obs = np.array([pos[i], vel[i]])
+            discrete = self.adapter.discretize_obs(obs)
+            s_idx = self.adapter.state_space.state_to_index(discrete)
+            macro_states.append(self.micro_to_macro.get(s_idx, 0))
+        macro_states = np.array(macro_states)
+
+        # Build segments and per-segment colours
+        points = np.column_stack([pos, vel])
+        segments = np.stack([points[:-1], points[1:]], axis=1)
+        seg_colors = [macro_colors[m] for m in macro_states[:-1]]
+
+        # Determine axis limits with padding
+        x_pad = 0.05 * (pos.max() - pos.min() + 1e-6)
+        y_pad = 0.05 * (vel.max() - vel.min() + 1e-6)
+        xlim = (pos.min() - x_pad, pos.max() + x_pad)
+        ylim = (vel.min() - y_pad, vel.max() + y_pad)
+
+        # Use bin edges for limits if available
+        if hasattr(self.adapter, 'get_bin_edges'):
+            edges0, edges1 = self.adapter.get_bin_edges()
+            xlim = (edges0[0], edges0[-1])
+            ylim = (edges1[0], edges1[-1])
+
+        # Match frames length to trajectory length (one frame per decision step)
+        n_frames = min(len(frames), T)
+
+        # Determine target width from the environment frame
+        env_h, env_w = frames[0].shape[:2]
+        fig_w_inches = 6.0
+        fig_h_inches = fig_w_inches * (env_h / env_w)  # preserve aspect
+        dpi = int(np.ceil(env_w / fig_w_inches))
+
+        combined_frames = []
+        for t in range(n_frames):
+            # Create trajectory plot for this timestep
+            fig, ax = plt.subplots(figsize=(fig_w_inches, fig_h_inches))
+            ax.set_xlim(xlim)
+            ax.set_ylim(ylim)
+            ax.set_xlabel(dim0_label, fontsize=10)
+            ax.set_ylabel(dim1_label, fontsize=10)
+            ax.set_title("Trajectory with macro actions", fontsize=12)
+
+            # Add legend for macro states visited so far
+            seen = set()
+            for m in macro_states[:t + 1]:
+                seen.add(m)
+            for m in sorted(seen):
+                ax.scatter([], [], color=macro_colors[m], label=f'{m}',
+                           marker='o', s=30, edgecolor='black')
+            ax.legend(loc='upper right', fontsize=8)
+
+            # Draw trajectory segments up to current time
+            if t > 0:
+                lc = LineCollection(segments[:t], colors=seg_colors[:t], linewidths=2)
+                ax.add_collection(lc)
+
+            # Current position marker
+            ax.plot(pos[t], vel[t], 'ro', markersize=5)
+
+            fig.tight_layout()
+
+            # Render figure to numpy array via savefig (portable across backends)
+            buf = BytesIO()
+            fig.savefig(buf, format='png', dpi=dpi, bbox_inches='tight',
+                        pad_inches=0.1)
+            buf.seek(0)
+            plot_pil = PILImage.open(buf).convert('RGB')
+            plt.close(fig)
+
+            # Resize plot image to match environment frame width
+            new_h = int(plot_pil.height * env_w / plot_pil.width)
+            plot_pil = plot_pil.resize((env_w, new_h), PILImage.LANCZOS)
+            plot_arr = np.array(plot_pil)
+
+            # Stack vertically: environment on top, trajectory on bottom
+            env_frame = frames[t]
+            if env_frame.shape[1] != env_w:
+                env_pil = PILImage.fromarray(env_frame)
+                env_pil = env_pil.resize(
+                    (env_w, int(env_frame.shape[0] * env_w / env_frame.shape[1])),
+                    PILImage.LANCZOS)
+                env_frame = np.array(env_pil)
+
+            combined = np.vstack([env_frame, plot_arr])
+
+            # Ensure dimensions are even (required by libx264)
+            h, w = combined.shape[:2]
+            h = h - (h % 2)
+            w = w - (w % 2)
+            combined = combined[:h, :w]
+
+            combined_frames.append(combined)
+
+        if combined_frames:
+            imageio.mimsave(save_path, combined_frames, fps=fps, macro_block_size=1)
+            print(f"  Saved combined video to {save_path} "
+                  f"({len(combined_frames)} frames, "
+                  f"{combined_frames[0].shape[1]}x{combined_frames[0].shape[0]})")
+        else:
+            print("  No frames to combine")
 
     # ==================== Trajectory Visualization ====================
 

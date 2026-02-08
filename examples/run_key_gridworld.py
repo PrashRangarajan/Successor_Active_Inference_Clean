@@ -127,6 +127,11 @@ def run_key_gridworld_example():
                        init_loc=init_loc, goal_loc=goal_loc)
     print("  Saved action trajectory to figures/key_gridworld/Actions_taken.png")
 
+    # Generate video of episode trajectory
+    agent.show_video(save_path="figures/key_gridworld/episode_video.mp4",
+                     init_loc=init_loc, goal_loc=goal_loc)
+    print("  Saved video to figures/key_gridworld/episode_video.mp4")
+
     # Visualize macro action policies
     agent.visualize_policy(save_dir="figures/key_gridworld/macro_action_network")
     print("  Saved policy visualizations to figures/key_gridworld/macro_action_network/")

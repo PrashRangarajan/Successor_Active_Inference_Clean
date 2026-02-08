@@ -264,7 +264,7 @@ def run_video_episode(agent, adapter, save_path: str, max_steps: int = 300):
         print(f"  Episode ended at max_steps={max_steps} without reaching goal")
 
     if frames:
-        imageio.mimsave(save_path, frames, fps=30)
+        imageio.mimsave(save_path, frames, fps=30, macro_block_size=1)
         print(f"  Saved video to {save_path} ({steps} steps)")
     else:
         print("  No frames to save")

@@ -40,6 +40,8 @@ class HierarchicalSRAgent(VisualizationMixin):
         n_replay_epochs: int = 10,
         replay_buffer_size: int = 50000,
         replay_mode: str = 'sequential',
+        train_smooth_steps: Optional[int] = None,
+        test_smooth_steps: int = 1,
     ):
         """
         Args:
@@ -57,12 +59,19 @@ class HierarchicalSRAgent(VisualizationMixin):
             replay_buffer_size: Maximum transitions to store for replay.
             replay_mode: 'sequential' (bioplausible, preserves temporal order)
                          or 'shuffle' (randomize episode order each epoch).
+            train_smooth_steps: Number of physics steps per action during
+                learning.  ``None`` = auto-detect (10 for continuous, 1
+                for discrete).
+            test_smooth_steps: Number of physics steps per action during
+                test-time episode execution.  Defaults to 1 (single step).
         """
         self.adapter = adapter
         self.n_clusters = n_clusters
         self.gamma = gamma
         self.learning_rate = learning_rate
         self.learn_from_experience = learn_from_experience
+        self.train_smooth_steps = train_smooth_steps
+        self.test_smooth_steps = test_smooth_steps
 
         # Matrices
         self.B = None  # Transition matrix
@@ -113,15 +122,28 @@ class HierarchicalSRAgent(VisualizationMixin):
         """
         print("Learning environment dynamics...")
 
+        # Resolve effective train smooth steps once for the whole learning phase
+        if self.train_smooth_steps is not None:
+            self._effective_train_smooth = self.train_smooth_steps
+        else:
+            # Auto-detect: 10 for continuous environments, 1 for discrete
+            is_continuous = not hasattr(self.adapter, 'grid_size')
+            self._effective_train_smooth = 10 if is_continuous else 1
+
         # Set learning mode on adapter (for POMDP adapters that support it)
         if hasattr(self.adapter, 'set_learning_mode'):
             self.adapter.set_learning_mode(True)
 
+        # Compute episode budget for adjacency learning:
+        # At least 20% of episodes or 1/n_actions (whichever is larger), minimum 500
+        adj_episodes = max(num_episodes // 5,
+                           num_episodes // self.adapter.n_actions,
+                           500)
+        sr_episodes = num_episodes - adj_episodes
+
         # Learn or compute transition and successor matrices
         if self.learn_from_experience:
-            self.B, self.M = self._learn_sr_from_experience(
-                num_episodes - num_episodes // self.adapter.n_actions
-            )
+            self.B, self.M = self._learn_sr_from_experience(sr_episodes)
         else:
             self.B = self.adapter.get_transition_matrix()
             # Make goal states absorbing (same treatment as the learned path)
@@ -138,9 +160,7 @@ class HierarchicalSRAgent(VisualizationMixin):
         self._compute_macro_preference()
 
         print("Learning macro state adjacency...")
-        self.adj_list, self.bottleneck_states = self._learn_adjacency(
-            num_episodes // self.adapter.n_actions
-        )
+        self.adj_list, self.bottleneck_states = self._learn_adjacency(adj_episodes)
         print(f"Adjacency list: {self.adj_list}")
 
         # Compute macro-level transition and successor matrices
@@ -210,10 +230,8 @@ class HierarchicalSRAgent(VisualizationMixin):
         experiences = []
         current_episode = []  # transitions for replay buffer
 
-        # Determine if this is a continuous environment that needs smooth stepping
-        # Check if adapter has a step_with_info method (continuous envs) or grid_size (discrete)
-        is_continuous = not hasattr(self.adapter, 'grid_size')
-        smooth_steps = 10 if is_continuous else 1
+        # Use the effective train smooth steps resolved in learn_environment()
+        smooth_steps = self._effective_train_smooth
 
         # Diverse-start exploration: if the adapter provides sample_random_state(),
         # use it for most episodes to fill in the transition model uniformly.
@@ -546,13 +564,17 @@ class HierarchicalSRAgent(VisualizationMixin):
         self.C_macro = np.zeros(self.n_clusters)
         for macro_idx in range(self.n_clusters):
             micro_states = self.macro_state_list[macro_idx]
+            if not micro_states:
+                continue
             if self.C.ndim == 1:
-                self.C_macro[macro_idx] = np.sum(self.C[micro_states])
+                self.C_macro[macro_idx] = np.mean(self.C[micro_states])
             else:
                 # Augmented state space - need to handle differently
+                values = []
                 for micro_idx in micro_states:
                     state = self.adapter.state_space.index_to_state(micro_idx)
-                    self.C_macro[macro_idx] += self.C[state]
+                    values.append(self.C[state])
+                self.C_macro[macro_idx] = np.mean(values) if values else 0.0
 
         print(f"Macro preference C_macro: {self.C_macro}")
 
@@ -571,15 +593,23 @@ class HierarchicalSRAgent(VisualizationMixin):
         bottleneck_states = defaultdict(set)
 
         episode_length = 50
+        has_diverse_starts = hasattr(self.adapter, 'sample_random_state')
 
         for ep in range(num_episodes):
-            self.adapter.reset()
+            if has_diverse_starts:
+                self.adapter.sample_random_state()
+            else:
+                self.adapter.reset()
             s = self.adapter.get_current_state_index()
 
             for step in range(episode_length):
                 action = random.randrange(self.adapter.n_actions)
-                self.adapter.step(action)
-                s_next = self.adapter.get_current_state_index()
+                # Use same smooth stepping as SR learning for consistency
+                for _ in range(self._effective_train_smooth):
+                    self.adapter.step(action)
+                    s_next = self.adapter.get_current_state_index()
+                    if s_next != s:
+                        break
 
                 # Check if macro state changed
                 if s in self.micro_to_macro and s_next in self.micro_to_macro:
@@ -631,14 +661,60 @@ class HierarchicalSRAgent(VisualizationMixin):
         B_macro = B_macro / B_macro.sum(axis=0, keepdims=True)
 
         # Compute successor matrix
-        B_avg = np.sum(B_macro, axis=2)
-        B_avg = B_avg / np.sum(B_avg, axis=1, keepdims=True)
+        # Average transition over actions (column-stochastic convention)
+        B_avg = np.sum(B_macro, axis=2) / B_macro.shape[2]
         I = np.eye(NC)
-        M_macro = np.linalg.pinv(I - 0.9 * B_avg)
+        M_macro = np.linalg.pinv(I - self.gamma * B_avg)
 
         return B_macro, M_macro
 
     # ==================== Episode Execution ====================
+
+    def _get_planning_state(self) -> np.ndarray:
+        """Get a one-hot state vector for planning from the adapter's current state.
+
+        In MDP environments, the adapter already returns a one-hot vector.
+        In POMDP environments, the adapter returns a belief distribution (spread
+        over many states), which causes ``_select_micro_action`` to compute
+        blurry expected values and make poor action choices.  This method
+        converts the belief to a clean one-hot at the MAP estimate so the
+        micro-level planner can differentiate actions properly.
+        """
+        s_idx = self.adapter.get_current_state_index()
+        state = np.zeros(self.adapter.n_states)
+        state[s_idx] = 1.0
+        return state
+
+    def _step_with_smooth(self, action: int, smooth_steps: int) -> int:
+        """Take an action with smooth stepping for continuous environments.
+
+        Repeats ``adapter.step(action)`` up to *smooth_steps* times, breaking
+        early if the discrete state changes or the episode terminates.
+
+        Args:
+            action: Action to execute.
+            smooth_steps: Maximum number of physics steps to take.
+
+        Returns:
+            Number of physics steps actually taken.
+        """
+        if smooth_steps <= 1:
+            # Fast path: no looping needed
+            self.adapter.step(action)
+            return 1
+
+        s_before = self.adapter.get_current_state_index()
+        for i in range(smooth_steps):
+            if hasattr(self.adapter, 'step_with_info'):
+                _, _, terminated, truncated, _ = self.adapter.step_with_info(action)
+                if terminated or truncated:
+                    return i + 1
+            else:
+                self.adapter.step(action)
+            s_after = self.adapter.get_current_state_index()
+            if s_after != s_before:
+                return i + 1
+        return smooth_steps
 
     def reset_episode(self, init_state: Optional[Any] = None):
         """Reset for a new episode.
@@ -646,7 +722,8 @@ class HierarchicalSRAgent(VisualizationMixin):
         Args:
             init_state: Optional initial state
         """
-        self.current_state = self.adapter.reset(init_state)
+        self.adapter.reset(init_state)
+        self.current_state = self._get_planning_state()
         self.state_history = [self.current_state.copy()]
         self.action_history = []
 
@@ -756,7 +833,10 @@ class HierarchicalSRAgent(VisualizationMixin):
         """
         bottleneck = self.bottleneck_states.get((init_macro, target_macro), [])
         if not bottleneck:
-            return 0, 0.0
+            # Fallback: use all micro states in the target cluster as goal
+            bottleneck = self.macro_state_list[target_macro]
+            if not bottleneck:
+                return 0, 0.0
 
         # Create temporary goal at bottleneck states
         C_temp = self.adapter.create_goal_prior(bottleneck, reward=10.0, default_cost=0.0)
@@ -771,7 +851,8 @@ class HierarchicalSRAgent(VisualizationMixin):
                 break
 
             action = self._select_micro_action(V)
-            self.current_state = self.adapter.step(action)
+            n_phys = self._step_with_smooth(action, self.test_smooth_steps)
+            self.current_state = self._get_planning_state()
             self.state_history.append(self.current_state.copy())
             self.action_history.append(action)
 
@@ -783,7 +864,7 @@ class HierarchicalSRAgent(VisualizationMixin):
                     state = self.adapter.state_space.index_to_state(s_idx)
                     reward += self.C[state]
 
-            steps += 1
+            steps += n_phys
 
             # Check if we've changed macro state
             if s_idx in self.micro_to_macro:
@@ -809,7 +890,8 @@ class HierarchicalSRAgent(VisualizationMixin):
 
         while steps < max_steps and not self._is_at_goal():
             action = self._select_micro_action(V)
-            self.current_state = self.adapter.step(action)
+            n_phys = self._step_with_smooth(action, self.test_smooth_steps)
+            self.current_state = self._get_planning_state()
             self.state_history.append(self.current_state.copy())
             self.action_history.append(action)
 
@@ -820,7 +902,7 @@ class HierarchicalSRAgent(VisualizationMixin):
                 state = self.adapter.state_space.index_to_state(s_idx)
                 reward += self.C[state]
 
-            steps += 1
+            steps += n_phys
 
         return steps, reward
 
@@ -884,7 +966,8 @@ class HierarchicalSRAgent(VisualizationMixin):
 
         while steps < max_steps and not self._is_at_goal():
             action = self._select_micro_action(V)
-            self.current_state = self.adapter.step(action)
+            n_phys = self._step_with_smooth(action, self.test_smooth_steps)
+            self.current_state = self._get_planning_state()
             self.state_history.append(self.current_state.copy())
             self.action_history.append(action)
 
@@ -895,7 +978,7 @@ class HierarchicalSRAgent(VisualizationMixin):
                 state = self.adapter.state_space.index_to_state(s_idx)
                 reward += self.C[state]
 
-            steps += 1
+            steps += n_phys
 
         return {
             'steps': steps,
@@ -933,6 +1016,21 @@ class HierarchicalSRAgent(VisualizationMixin):
                 )
                 V_bn = self.adapter.multiply_M_C(self.M, C_temp)
                 self._bottleneck_policies[(src, tgt)] = self._compute_policy_table(V_bn)
+
+        # 2b. Fallback policies for macro transitions without observed bottlenecks
+        for s_macro in range(self.n_clusters):
+            if s_macro not in self.adj_list:
+                continue
+            for target_macro in self.adj_list[s_macro]:
+                if (s_macro, target_macro) not in self._bottleneck_policies:
+                    target_states = self.macro_state_list[target_macro]
+                    if target_states:
+                        C_temp = self.adapter.create_goal_prior(
+                            target_states, reward=10.0, default_cost=0.0
+                        )
+                        V_bn = self.adapter.multiply_M_C(self.M, C_temp)
+                        self._bottleneck_policies[(s_macro, target_macro)] = \
+                            self._compute_policy_table(V_bn)
 
         # 3. Macro policy: best macro action for each macro state
         V_macro = self.M_macro @ self.C_macro
@@ -1016,10 +1114,14 @@ class HierarchicalSRAgent(VisualizationMixin):
             # Navigate to bottleneck using cached bottleneck policy
             bn_policy = self._bottleneck_policies.get((s_macro, target_macro))
             if bn_policy is None:
-                break
+                # Fallback: use goal policy to navigate toward the goal
+                bn_policy = self._goal_policy
             bottleneck_set = set(
                 self.bottleneck_states.get((s_macro, target_macro), [])
             )
+            if not bottleneck_set:
+                # Fallback: use all target cluster states
+                bottleneck_set = set(self.macro_state_list[target_macro])
 
             while total_steps < max_steps:
                 s_idx = self.adapter.get_current_state_index()
@@ -1027,10 +1129,11 @@ class HierarchicalSRAgent(VisualizationMixin):
                     break
 
                 action = bn_policy.get(s_idx, 0)  # O(1) lookup
-                self.current_state = self.adapter.step(action)
+                n_phys = self._step_with_smooth(action, self.test_smooth_steps)
+                self.current_state = self._get_planning_state()
                 self.state_history.append(self.current_state.copy())
                 self.action_history.append(action)
-                total_steps += 1
+                total_steps += n_phys
 
                 s_idx = self.adapter.get_current_state_index()
                 total_reward += self._get_reward(s_idx)
@@ -1047,10 +1150,11 @@ class HierarchicalSRAgent(VisualizationMixin):
         while total_steps < max_steps and not self._is_at_goal():
             s_idx = self.adapter.get_current_state_index()
             action = self._goal_policy.get(s_idx, 0)  # O(1) lookup
-            self.current_state = self.adapter.step(action)
+            n_phys = self._step_with_smooth(action, self.test_smooth_steps)
+            self.current_state = self._get_planning_state()
             self.state_history.append(self.current_state.copy())
             self.action_history.append(action)
-            total_steps += 1
+            total_steps += n_phys
 
             s_idx = self.adapter.get_current_state_index()
             total_reward += self._get_reward(s_idx)
@@ -1070,13 +1174,14 @@ class HierarchicalSRAgent(VisualizationMixin):
         while steps < max_steps and not self._is_at_goal():
             s_idx = self.adapter.get_current_state_index()
             action = self._goal_policy.get(s_idx, 0)  # O(1) lookup
-            self.current_state = self.adapter.step(action)
+            n_phys = self._step_with_smooth(action, self.test_smooth_steps)
+            self.current_state = self._get_planning_state()
             self.state_history.append(self.current_state.copy())
             self.action_history.append(action)
 
             s_idx = self.adapter.get_current_state_index()
             reward += self._get_reward(s_idx)
-            steps += 1
+            steps += n_phys
 
         return {
             'steps': steps,

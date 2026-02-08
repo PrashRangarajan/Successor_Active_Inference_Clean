@@ -154,6 +154,35 @@ class MountainCarAdapter(BaseEnvironmentAdapter):
         """Get current continuous observation [pos, vel]."""
         return self._current_obs
 
+    def sample_random_state(self) -> np.ndarray:
+        """Reset to a uniformly random state across the full state space.
+
+        Ensures every region of the discretized state space has a chance of
+        being visited during training, which is critical for building a
+        complete transition model B.  Without this, every episode starts
+        from the default position (-0.5) and Gym's 200-step truncation
+        prevents the agent from ever visiting the goal region.
+
+        Returns:
+            One-hot encoded discretized state.
+        """
+        # Normal reset so Gym's bookkeeping is valid
+        obs, _ = self._env.reset()
+
+        # Sample random continuous state within environment bounds
+        pos = np.random.uniform(self.low[0], self.high[0])
+        vel = np.random.uniform(self.low[1], self.high[1])
+
+        # Inject into the physics engine
+        self._env.unwrapped.state = np.array([pos, vel])
+        obs = np.array([pos, vel])
+
+        self._current_obs = obs
+        discrete_state = self.discretize_obs(obs)
+        state_idx = self.state_space.state_to_index(discrete_state)
+        self._current_state = self.state_space.index_to_onehot(state_idx)
+        return self._current_state
+
     # ==================== Matrix Operations ====================
 
     def multiply_B_s(self, B: np.ndarray, state: np.ndarray, action: Optional[int]) -> np.ndarray:
@@ -267,3 +296,23 @@ class MountainCarAdapter(BaseEnvironmentAdapter):
         pos_centers = 0.5 * (self.pos_space[:-1] + self.pos_space[1:])
         vel_centers = 0.5 * (self.vel_space[:-1] + self.vel_space[1:])
         return pos_centers, vel_centers
+
+    def get_dimension_labels(self) -> Tuple[str, str]:
+        """Return human-readable axis labels for the 2D state space."""
+        return ("Position", "Velocity")
+
+    def get_bin_edges(self) -> Tuple[np.ndarray, np.ndarray]:
+        """Return bin edge arrays for each dimension.
+
+        Used by cluster and trajectory visualizations to map bin indices
+        to physical coordinates.
+        """
+        return self.pos_space, self.vel_space
+
+    def obs_to_continuous(self, obs: np.ndarray) -> Tuple[float, float]:
+        """Extract (position, velocity) from raw observation."""
+        return float(obs[0]), float(obs[1])
+
+    def get_action_labels(self) -> List[str]:
+        """Return human-readable labels for each action index."""
+        return ["\u2190 Push Left", "\u00b7 No Push", "\u2192 Push Right"]
