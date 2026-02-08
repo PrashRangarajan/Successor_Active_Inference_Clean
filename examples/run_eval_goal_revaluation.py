@@ -42,7 +42,7 @@ plt.style.use("seaborn-v0_8-poster")
 
 from core import HierarchicalSRAgent
 from core.q_learning import QLearningAgent
-from environments.gridworld import GridworldAdapter
+from environments.gridworld import GridworldAdapter, get_layout, AVAILABLE_LAYOUTS
 from unified_env import StandardGridworld as SR_Gridworld
 
 
@@ -557,57 +557,6 @@ def plot_phase1_baseline(args, data_dir, save_dir):
     print(f"  Saved {save_dir}/{fname}")
 
 
-# ==================== Layout Configurations ====================
-
-
-def get_layout_config(layout_name, grid_size):
-    """Return (walls, goal_A, goal_B, n_macro) for a named layout.
-
-    Args:
-        layout_name: 'serpentine', 'fourrooms', or 'fiverooms'
-        grid_size: Side length of the grid
-
-    Returns:
-        Tuple of (walls, goal_A, goal_B, n_macro)
-    """
-    if layout_name == "serpentine":
-        walls = (
-            [(1, x) for x in range(grid_size // 2 + 2)]
-            + [(3, x) for x in range(grid_size // 2 - 2, grid_size)]
-            + [(5, x) for x in range(grid_size // 2 + 2)]
-            + [(7, x) for x in range(grid_size // 2 - 2, grid_size)]
-        )
-        goal_A = (grid_size - 1, grid_size - 1)  # bottom-right
-        goal_B = (0, grid_size - 1)               # top-right
-        n_macro = 4
-    elif layout_name == "fourrooms":
-        walls = (
-            [(4, y) for y in range(grid_size) if y not in [2, 6]]
-            + [(x, 4) for x in range(grid_size) if x not in [2, 6]]
-        )
-        goal_A = (grid_size - 1, grid_size - 1)  # bottom-right room
-        goal_B = (grid_size - 1, 0)               # top-right room
-        n_macro = 4
-    elif layout_name == "fiverooms":
-        # Two large rooms on top separated by a vertical wall at col 4,
-        # a horizontal wall at row 4 spanning most of the width, and
-        # three smaller rooms on the bottom separated by vertical walls
-        # at cols 2 and 6.
-        walls = (
-            [(x, 2) for x in range(grid_size) if x in [4, 5, 7, 8]]
-            + [(x, 6) for x in range(grid_size) if x in [4, 5, 7, 8]]
-            + [(x, 4) for x in range(grid_size) if x in [0, 1, 3]]
-            + [(4, x) for x in range(grid_size) if x not in [0, 8]]
-        )
-        goal_A = (grid_size - 1, grid_size - 1)  # bottom-right room
-        goal_B = (grid_size - 1, 0)               # bottom-left room
-        n_macro = 5
-    else:
-        raise ValueError(f"Unknown layout: {layout_name}. "
-                         f"Choose from: serpentine, fourrooms, fiverooms")
-    return walls, goal_A, goal_B, n_macro
-
-
 # ==================== Main ====================
 
 
@@ -630,7 +579,7 @@ if __name__ == "__main__":
     parser.add_argument("--quick", action="store_true", help="Quick test")
     parser.add_argument("--n_runs", type=int, default=nruns)
     parser.add_argument("--layout", type=str, default="serpentine",
-                        choices=["serpentine", "fourrooms", "fiverooms"],
+                        choices=AVAILABLE_LAYOUTS,
                         help="Wall layout (default: serpentine)")
     args_cli = parser.parse_args()
 
@@ -641,7 +590,11 @@ if __name__ == "__main__":
         n_eval = 5
 
     # Get layout-specific configuration
-    WALLS, goal_A, goal_B, n_macro = get_layout_config(args_cli.layout, grid_size)
+    _layout = get_layout(args_cli.layout, grid_size)
+    WALLS = _layout.walls
+    goal_A = _layout.default_goal
+    goal_B = _layout.alt_goal
+    n_macro = _layout.n_clusters
 
     args = argparse.Namespace(
         grid_size=grid_size,

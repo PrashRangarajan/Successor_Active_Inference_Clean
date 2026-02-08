@@ -8,11 +8,12 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+import argparse
 import numpy as np
 
 # Import the unified framework
 from core import HierarchicalSRAgent
-from environments.gridworld import GridworldAdapter
+from environments.gridworld import GridworldAdapter, get_layout, AVAILABLE_LAYOUTS
 
 # Import environment - can use either:
 # Option 1: Original environment
@@ -21,20 +22,17 @@ from environments.gridworld import GridworldAdapter
 from unified_env import StandardGridworld as SR_Gridworld
 
 
-def run_gridworld_example():
+def run_gridworld_example(layout_name="fourrooms"):
     """Run the hierarchical SR agent on a gridworld environment."""
 
     # Configuration
     grid_size = 9
-    n_clusters = 4
     init_loc = (0, 0)
-    goal_loc = (grid_size - 1, grid_size - 1)
 
-    # Define walls
-    walls = (
-        [(4, x) for x in range(grid_size) if x not in [2, 6]] +
-        [(x, 4) for x in range(grid_size) if x not in [2, 6]]
-    )
+    layout = get_layout(layout_name, grid_size)
+    n_clusters = layout.n_clusters
+    goal_loc = layout.default_goal
+    walls = layout.walls
 
     # Create the original environment
     env = SR_Gridworld(grid_size)
@@ -135,4 +133,11 @@ def run_gridworld_example():
 
 
 if __name__ == '__main__':
-    run_gridworld_example()
+    parser = argparse.ArgumentParser(
+        description="Hierarchical SR agent on Gridworld"
+    )
+    parser.add_argument("--layout", type=str, default="fourrooms",
+                        choices=AVAILABLE_LAYOUTS,
+                        help="Wall layout (default: fourrooms)")
+    args = parser.parse_args()
+    run_gridworld_example(layout_name=args.layout)

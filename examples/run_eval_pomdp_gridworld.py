@@ -41,6 +41,7 @@ plt.style.use("seaborn-v0_8-poster")
 
 from core import HierarchicalSRAgent
 from environments.pomdp_gridworld import POMDPGridworldAdapter
+from environments.gridworld import get_layout, AVAILABLE_LAYOUTS
 from unified_env import StandardGridworld as SR_Gridworld
 
 
@@ -416,7 +417,6 @@ def plot_pomdp_stability(args, data_dir="data/eval/pomdp_gridworld",
 if __name__ == "__main__":
     # POMDP Gridworld configuration
     grid_size = 9
-    n_clusters = 4  # One per room
     gamma = 0.99
     nruns = 10
     eps = [100, 250, 500, 1000, 1500, 2500, 5000]
@@ -428,45 +428,34 @@ if __name__ == "__main__":
     beta = 1.0  # Information gain weight — strong enough to reroute around noisy room
 
     init_loc = (0, 0)
-    goal_loc = (grid_size - 1, grid_size - 1)
-
-    # 4-rooms layout on 9x9 grid
-    # Vertical wall at x=4 (rows 0-8), horizontal wall at y=4 (cols 0-8)
-    # With doorways at specific positions
-    mid = grid_size // 2  # 4
-
-    # Vertical wall (x=mid for all y, except doorways)
-    vertical_door_y = [1, 7]  # doorways in vertical wall
-    vertical_wall = [(mid, y) for y in range(grid_size) if y not in vertical_door_y]
-
-    # Horizontal wall (y=mid for all x, except doorways)
-    horizontal_door_x = [1, 7]  # doorways in horizontal wall
-    horizontal_wall = [(x, mid) for x in range(grid_size) if x not in horizontal_door_x]
-
-    walls = vertical_wall + horizontal_wall
-
-    # Asymmetric noise: top-right room is heavily noisy
-    # Agent at (0,0), goal at (8,8). Direct route goes through top-right room.
-    # With high noise there, the EFE-aware agent should prefer the longer
-    # route through the bottom-left room (clean path).
-    #
-    # Room layout:
-    #   Top-left (0-3, 0-3):     Agent start - CLEAN
-    #   Top-right (5-8, 0-3):    Direct route - NOISY
-    #   Bottom-left (0-3, 5-8):  Alternative  - CLEAN
-    #   Bottom-right (5-8, 5-8): Goal         - CLEAN
-    noisy_states = [
-        (x, y)
-        for x in range(mid + 1, grid_size)
-        for y in range(mid)
-        if (x, y) not in walls
-    ]
 
     parser = argparse.ArgumentParser(description="POMDP Gridworld Eval: Hierarchy vs Flat")
     parser.add_argument("--train", action="store_true", help="Run experiments")
     parser.add_argument("--quick", action="store_true", help="Quick test")
     parser.add_argument("--n_runs", type=int, default=nruns)
+    parser.add_argument("--layout", type=str, default="fourrooms",
+                        choices=AVAILABLE_LAYOUTS,
+                        help="Wall layout (default: fourrooms)")
     args_cli = parser.parse_args()
+
+    # Get layout-specific configuration
+    _layout = get_layout(args_cli.layout, grid_size)
+    n_clusters = _layout.n_clusters
+    goal_loc = _layout.default_goal
+    walls = _layout.walls
+    wall_set = set(walls)
+
+    # Asymmetric noise: top-right quadrant is heavily noisy.
+    # Agent at (0,0), goal at bottom-right. Direct route goes through
+    # top-right area. With high noise there, the EFE-aware agent should
+    # prefer the longer route through cleaner areas.
+    mid = grid_size // 2
+    noisy_states = [
+        (x, y)
+        for x in range(mid + 1, grid_size)
+        for y in range(mid)
+        if (x, y) not in wall_set
+    ]
 
     if args_cli.quick:
         eps = [500, 2000, 5000]
@@ -488,8 +477,8 @@ if __name__ == "__main__":
         walls=walls,
     )
 
-    data_dir = "data/eval/pomdp_gridworld"
-    save_dir = "figures/eval/pomdp_gridworld"
+    data_dir = f"data/eval/pomdp_gridworld/{args_cli.layout}"
+    save_dir = f"figures/eval/pomdp_gridworld/{args_cli.layout}"
 
     if args_cli.train:
         os.makedirs(data_dir, exist_ok=True)

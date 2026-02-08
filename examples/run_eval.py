@@ -38,7 +38,7 @@ import numpy as np
 
 from core import HierarchicalSRAgent
 from core.q_learning import QLearningAgent
-from environments.gridworld import GridworldAdapter
+from environments.gridworld import GridworldAdapter, get_layout, AVAILABLE_LAYOUTS
 from unified_env import StandardGridworld as SR_Gridworld
 
 
@@ -337,29 +337,28 @@ def SR_distances(args, GOALS):
 
 if __name__ == "__main__":
     grid_size = 9
-    n_macro = 4
     init_loc = (0, 0)
-    goal_loc = (grid_size - 1, grid_size - 1)
     nruns = 20
     eps = [50, 100, 200, 300, 400, 500, 750, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000]
     # eps = [50, 100, 250, 500, 1000, 2000, 4000, 8000]
     GOALS = [(0, 3), (0, 6), (2, 4), (3, 0), (4, 4), (5, 8), (6, 3), (7, 0), (8, 4), (8, 8)]
     goal_val = 100
 
-    # Serpentine wall pattern
-    WALLS = (
-        [(1, x) for x in range(grid_size // 2 + 2)]
-        + [(3, x) for x in range(grid_size // 2 - 2, grid_size)]
-        + [(5, x) for x in range(grid_size // 2 + 2)]
-        + [(7, x) for x in range(grid_size // 2 - 2, grid_size)]
-    )
-
     parser = argparse.ArgumentParser(description="Evaluation: Hierarchy vs Flat vs Q-Learning")
     parser.add_argument("--train", action="store_true", help="Run experiments (default: plot from saved data)")
     parser.add_argument("--quick", action="store_true", help="Quick test with small parameters")
     parser.add_argument("--n_runs", type=int, default=nruns, help="Number of seeds")
     parser.add_argument("--no_distances", action="store_true", help="Skip distance experiment")
+    parser.add_argument("--layout", type=str, default="serpentine",
+                        choices=AVAILABLE_LAYOUTS,
+                        help="Wall layout (default: serpentine)")
     args_cli = parser.parse_args()
+
+    # Get layout-specific configuration
+    _layout = get_layout(args_cli.layout, grid_size)
+    n_macro = _layout.n_clusters
+    goal_loc = _layout.default_goal
+    WALLS = _layout.walls
 
     # Build args namespace (matches legacy format for plotting compatibility)
     if args_cli.quick:
@@ -377,8 +376,8 @@ if __name__ == "__main__":
         episodes=eps,
     )
 
-    data_dir = "data/eval/gridworld"
-    save_dir = "figures/eval/gridworld"
+    data_dir = f"data/eval/gridworld/{args_cli.layout}"
+    save_dir = f"figures/eval/gridworld/{args_cli.layout}"
 
     if args_cli.train:
         os.makedirs(data_dir, exist_ok=True)
