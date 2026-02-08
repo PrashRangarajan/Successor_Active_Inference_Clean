@@ -106,8 +106,10 @@ def run_key_gridworld_example():
     print("VISUALIZATION")
     print("="*50)
 
-    # Visualize matrices
-    agent.view_matrices(save_dir="figures/key_gridworld/matrices", learned=True)
+    # Visualize matrices (M from origin uses init_loc by default)
+    origin_idx = init_loc[0] * grid_size + init_loc[1]
+    agent.view_matrices(save_dir="figures/key_gridworld/matrices", learned=True,
+                        origin_state=origin_idx)
     print("  Saved matrix visualizations to figures/key_gridworld/matrices/")
 
     # Visualize clusters (note: for augmented state space, this shows flattened view)
@@ -127,9 +129,9 @@ def run_key_gridworld_example():
                        init_loc=init_loc, goal_loc=goal_loc)
     print("  Saved action trajectory to figures/key_gridworld/Actions_taken.png")
 
-    # Generate video of episode trajectory
+    # Generate video of episode trajectory (with key status + backtracking indicators)
     agent.show_video(save_path="figures/key_gridworld/episode_video.mp4",
-                     init_loc=init_loc, goal_loc=goal_loc)
+                     init_loc=init_loc, goal_loc=goal_loc, key_loc=key_loc)
     print("  Saved video to figures/key_gridworld/episode_video.mp4")
 
     # Visualize macro action policies

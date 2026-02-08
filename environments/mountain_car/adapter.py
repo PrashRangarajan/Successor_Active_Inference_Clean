@@ -154,6 +154,14 @@ class MountainCarAdapter(BaseEnvironmentAdapter):
         """Get current continuous observation [pos, vel]."""
         return self._current_obs
 
+    def get_state_for_reset(self) -> np.ndarray:
+        """Get current state in a format suitable for reset().
+
+        MountainCar reset() expects continuous [position, velocity],
+        not discrete bin indices.
+        """
+        return self._current_obs.copy()
+
     def sample_random_state(self) -> np.ndarray:
         """Reset to a uniformly random state across the full state space.
 

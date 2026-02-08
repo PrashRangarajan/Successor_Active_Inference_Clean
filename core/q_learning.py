@@ -98,6 +98,10 @@ class QLearningAgent:
         This method is INCREMENTAL — Q-values accumulate across calls.
         This matches the legacy learn_env_likelikood() behavior.
 
+        For continuous environments (MountainCar, Acrobot), uses
+        sample_random_state() for diverse-start exploration, matching
+        the SR agent's training strategy.
+
         Args:
             num_episodes: Number of training episodes to run
         """
@@ -107,11 +111,16 @@ class QLearningAgent:
         else:
             max_steps = 200
 
+        has_diverse_starts = hasattr(self.adapter, 'sample_random_state')
+
         for ep in range(num_episodes):
             if (ep + 1) % 100 == 0:
                 print(f"Q-learning episode {self.total_episodes + ep + 1}", end='\r')
 
-            self.adapter.reset()
+            if has_diverse_starts:
+                self.adapter.sample_random_state()
+            else:
+                self.adapter.reset()
             state_idx = self.adapter.get_current_state_index()
 
             for t in range(max_steps):
@@ -178,11 +187,14 @@ class QLearningAgent:
                 break
 
             # Handle being stuck (wall) — try other actions
-            if next_state_idx == state_idx:
+            # Only for discrete environments where same-state means hitting a wall.
+            # For continuous environments, same bin doesn't mean stuck.
+            if next_state_idx == state_idx and hasattr(self.adapter, 'grid_size'):
+                native_state = self.adapter.get_state_for_reset()
                 moved = False
                 for alt_action in range(self.n_actions):
                     if alt_action != action:
-                        self.adapter.reset(int(state_idx))
+                        self.adapter.reset(native_state)
                         self.adapter.step(alt_action)
                         alt_next = self.adapter.get_current_state_index()
                         if alt_next != state_idx:
@@ -191,7 +203,7 @@ class QLearningAgent:
                             break
                 if not moved:
                     # Truly stuck, reset back to current position
-                    self.adapter.reset(int(state_idx))
+                    self.adapter.reset(native_state)
 
             state_idx = next_state_idx
 

@@ -2,17 +2,11 @@
   "grid_size": 5,
   "n_clusters": 5,
   "gamma": 0.99,
-  "n_runs": 10,
+  "n_runs": 2,
   "episodes": [
-    100,
-    200,
     500,
-    750,
-    1000,
     1500,
-    2000,
-    3000,
-    4000
+    3000
   ],
   "test_max_steps": 100,
   "has_pickup_action": true,

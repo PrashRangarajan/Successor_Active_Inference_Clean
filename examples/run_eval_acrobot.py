@@ -1,7 +1,8 @@
-"""Evaluation: Acrobot benchmark comparing Hierarchy vs Flat.
+"""Evaluation: Acrobot benchmark comparing Hierarchy vs Flat vs Q-Learning.
 
 Runs repeated experiments across training checkpoints to compare
-hierarchical vs flat active inference on the continuous Acrobot environment.
+hierarchical vs flat active inference and Q-learning on the continuous
+Acrobot environment.
 
 Saves .npy data files to data/eval/acrobot/ and figures to figures/eval/acrobot/.
 
@@ -36,6 +37,7 @@ import matplotlib.pyplot as plt
 plt.style.use("seaborn-v0_8-poster")
 
 from core import HierarchicalSRAgent
+from core.q_learning import QLearningAgent
 from environments.acrobot import AcrobotAdapter
 
 
@@ -66,9 +68,10 @@ def relative_stability_paper_style(returns, Ke=100, smooth_window=1, eps=1e-8):
 
 
 def create_acrobot_agent(n_theta_bins, n_dtheta_bins, n_clusters,
-                         num_episodes, gamma=0.99, learning_rate=0.05,
+                         num_episodes, gamma=0.95, learning_rate=0.05,
                          use_replay=True, n_replay_epochs=10,
-                         test_max_steps=1000):
+                         test_max_steps=1000,
+                         goal_velocity_filter=True):
     """Create a fresh Acrobot SR agent trained for exactly num_episodes.
 
     Returns:
@@ -80,6 +83,7 @@ def create_acrobot_agent(n_theta_bins, n_dtheta_bins, n_clusters,
         env_train,
         n_theta_bins=n_theta_bins,
         n_dtheta_bins=n_dtheta_bins,
+        goal_velocity_filter=goal_velocity_filter,
     )
 
     agent = HierarchicalSRAgent(
@@ -90,8 +94,10 @@ def create_acrobot_agent(n_theta_bins, n_dtheta_bins, n_clusters,
         learn_from_experience=True,
         use_replay=use_replay,
         n_replay_epochs=n_replay_epochs,
+        train_smooth_steps=10,   # Acrobot needs multi-step to change discrete bins
+        test_smooth_steps=10,    # Match training dynamics at test time
     )
-    agent.set_goal(None, reward=100.0)
+    agent.set_goal(None, reward=100.0, default_cost=-1.0)
     agent.learn_environment(num_episodes)
 
     # Switch to test environment with longer episode limit
@@ -100,27 +106,60 @@ def create_acrobot_agent(n_theta_bins, n_dtheta_bins, n_clusters,
         env_test,
         n_theta_bins=n_theta_bins,
         n_dtheta_bins=n_dtheta_bins,
+        goal_velocity_filter=goal_velocity_filter,
     )
     agent.adapter = adapter_test
 
     return agent, adapter_test
 
 
+def create_acrobot_q_agent(n_theta_bins, n_dtheta_bins, gamma=0.95,
+                            test_max_steps=1000,
+                            goal_velocity_filter=True):
+    """Create a fresh Q-learning agent for Acrobot (not yet trained).
+
+    The Q-learning agent's learn() IS incremental, so we create one per run
+    and call learn(delta) at each checkpoint.
+
+    Returns:
+        (q_agent, adapter) tuple
+    """
+    env = gym.make('Acrobot-v1', max_episode_steps=test_max_steps)
+    adapter = AcrobotAdapter(env, n_theta_bins=n_theta_bins, n_dtheta_bins=n_dtheta_bins,
+                             goal_velocity_filter=goal_velocity_filter)
+
+    goal_states = adapter.get_goal_states(None)
+    C = adapter.create_goal_prior(goal_states, reward=100.0, default_cost=-1.0)
+
+    q_agent = QLearningAgent(
+        adapter=adapter,
+        goal_states=goal_states,
+        C=C,
+        gamma=gamma,
+        epsilon_decay=0.999,   # Slower decay for continuous env exploration
+        epsilon_end=0.1,       # Maintain exploration to avoid Q-value instability
+    )
+    return q_agent, adapter
+
+
 # ==================== Experiment ====================
 
 
 def acrobot_rewards_experiment(args):
-    """Main experiment: rewards across training checkpoints for Hierarchy vs Flat.
+    """Main experiment: rewards across training checkpoints for Hierarchy vs Flat vs Q-Learning.
 
     Returns:
-        Tuple of (SR_rewards_hier, SR_rewards_flat, SR_steps_hier, SR_steps_flat)
+        Tuple of (SR_rewards_hier, SR_rewards_flat, Q_rewards,
+                  SR_steps_hier, SR_steps_flat, Q_steps)
     """
     n_trials = len(args.episodes)
 
     SR_rewards_hier = np.zeros((args.n_runs, n_trials))
     SR_rewards_flat = np.zeros((args.n_runs, n_trials))
+    Q_rewards = np.zeros((args.n_runs, n_trials))
     SR_steps_hier = np.zeros((args.n_runs, n_trials))
     SR_steps_flat = np.zeros((args.n_runs, n_trials))
+    Q_steps = np.zeros((args.n_runs, n_trials))
 
     init_state = [0.0, 0.0, 0.0, 0.0]
 
@@ -129,8 +168,21 @@ def acrobot_rewards_experiment(args):
         print(f"Run: {n + 1}/{args.n_runs}")
         print("x" * 40)
 
+        # Create Q-learning agent (incremental — one per run)
+        q_agent, q_adapter = create_acrobot_q_agent(
+            args.n_theta_bins, args.n_dtheta_bins,
+            gamma=args.gamma,
+            test_max_steps=args.test_max_steps,
+        )
+
         for trial in range(n_trials):
             num_episodes = args.episodes[trial]
+
+            # Q-learning: incremental training
+            if trial == 0:
+                q_delta = num_episodes
+            else:
+                q_delta = num_episodes - args.episodes[trial - 1]
 
             print()
             print("+" * 25)
@@ -164,40 +216,61 @@ def acrobot_rewards_experiment(args):
             agent.reset_episode(init_state=init_state)
             result_flat = agent.run_episode_flat(max_steps=args.test_max_steps)
 
+            # Q-learning: train incrementally, then evaluate
+            print("\nQ-Learning")
+            q_agent.learn(q_delta)
+            result_q = q_agent.run_episode(init_state=init_state, max_steps=args.test_max_steps)
+
             SR_rewards_hier[n, trial] = result_hier["reward"]
             SR_rewards_flat[n, trial] = result_flat["reward"]
+            Q_rewards[n, trial] = result_q["reward"]
             SR_steps_hier[n, trial] = result_hier["steps"]
             SR_steps_flat[n, trial] = result_flat["steps"]
+            Q_steps[n, trial] = result_q["steps"]
 
             print(f"  Hier: reward={result_hier['reward']:.1f}, "
                   f"steps={result_hier['steps']}, goal={result_hier['reached_goal']}")
             print(f"  Flat: reward={result_flat['reward']:.1f}, "
                   f"steps={result_flat['steps']}, goal={result_flat['reached_goal']}")
+            print(f"  Q:    reward={result_q['reward']:.1f}, "
+                  f"steps={result_q['steps']}, goal={result_q['reached_goal']}")
 
-    return SR_rewards_hier, SR_rewards_flat, SR_steps_hier, SR_steps_flat
+    return SR_rewards_hier, SR_rewards_flat, Q_rewards, SR_steps_hier, SR_steps_flat, Q_steps
 
 
 # ==================== Plotting ====================
 
 
-def plot_acrobot_rewards(args, save_dir="figures/eval/acrobot"):
-    """Plot reward curves with confidence bands (Hierarchy vs Flat)."""
+def plot_acrobot_rewards(args, data_dir="data/eval/acrobot",
+                         save_dir="figures/eval/acrobot"):
+    """Plot reward curves with confidence bands (Hierarchy vs Flat vs Q-Learning)."""
     os.makedirs(save_dir, exist_ok=True)
     eps_range = args.episodes
 
-    hier = np.load("data/eval/acrobot/SR_rewards_hierarchy.npy")[:, :len(eps_range)]
-    flat = np.load("data/eval/acrobot/SR_rewards_flat.npy")[:, :len(eps_range)]
+    hier = np.load(os.path.join(data_dir, "SR_rewards_hierarchy.npy"))[:, :len(eps_range)]
+    flat = np.load(os.path.join(data_dir, "SR_rewards_flat.npy"))[:, :len(eps_range)]
 
     mean_hier = np.mean(hier, axis=0)
     std_hier = np.std(hier, axis=0) / np.sqrt(len(hier))
     mean_flat = np.mean(flat, axis=0)
     std_flat = np.std(flat, axis=0) / np.sqrt(len(flat))
 
+    # Load Q-learning rewards if available
+    Q_rewards_path = os.path.join(data_dir, "Q_rewards.npy")
+    has_q_learning = os.path.exists(Q_rewards_path)
+    if has_q_learning:
+        q_data = np.load(Q_rewards_path)[:, :len(eps_range)]
+        mean_q = np.mean(q_data, axis=0)
+        std_q = np.std(q_data, axis=0) / np.sqrt(len(q_data))
+
     fig = plt.figure(figsize=(14, 10))
     plt.plot(eps_range, mean_hier, label="Hierarchy")
     plt.fill_between(eps_range, mean_hier - std_hier, mean_hier + std_hier, alpha=0.5)
     plt.plot(eps_range, mean_flat, label="Flat")
     plt.fill_between(eps_range, mean_flat - std_flat, mean_flat + std_flat, alpha=0.5)
+    if has_q_learning:
+        plt.plot(eps_range, mean_q, label="Q-Learning")
+        plt.fill_between(eps_range, mean_q - std_q, mean_q + std_q, alpha=0.5)
 
     plt.xlabel("Number of Training Episodes", fontsize=28)
     plt.ylabel("Total Reward", fontsize=28)
@@ -210,24 +283,36 @@ def plot_acrobot_rewards(args, save_dir="figures/eval/acrobot"):
     print(f"  Saved {save_dir}/acrobot_reward.png")
 
 
-def plot_acrobot_steps(args, save_dir="figures/eval/acrobot"):
-    """Plot steps-to-goal curves (Hierarchy vs Flat)."""
+def plot_acrobot_steps(args, data_dir="data/eval/acrobot",
+                       save_dir="figures/eval/acrobot"):
+    """Plot steps-to-goal curves (Hierarchy vs Flat vs Q-Learning)."""
     os.makedirs(save_dir, exist_ok=True)
     eps_range = args.episodes
 
-    hier = np.load("data/eval/acrobot/SR_steps_hierarchy.npy")[:, :len(eps_range)]
-    flat = np.load("data/eval/acrobot/SR_steps_flat.npy")[:, :len(eps_range)]
+    hier = np.load(os.path.join(data_dir, "SR_steps_hierarchy.npy"))[:, :len(eps_range)]
+    flat = np.load(os.path.join(data_dir, "SR_steps_flat.npy"))[:, :len(eps_range)]
 
     mean_hier = np.mean(hier, axis=0)
     std_hier = np.std(hier, axis=0) / np.sqrt(len(hier))
     mean_flat = np.mean(flat, axis=0)
     std_flat = np.std(flat, axis=0) / np.sqrt(len(flat))
 
+    # Load Q-learning steps if available
+    Q_steps_path = os.path.join(data_dir, "Q_steps.npy")
+    has_q_learning = os.path.exists(Q_steps_path)
+    if has_q_learning:
+        q_data = np.load(Q_steps_path)[:, :len(eps_range)]
+        mean_q = np.mean(q_data, axis=0)
+        std_q = np.std(q_data, axis=0) / np.sqrt(len(q_data))
+
     fig = plt.figure(figsize=(14, 10))
     plt.plot(eps_range, mean_hier, label="Hierarchy")
     plt.fill_between(eps_range, mean_hier - std_hier, mean_hier + std_hier, alpha=0.5)
     plt.plot(eps_range, mean_flat, label="Flat")
     plt.fill_between(eps_range, mean_flat - std_flat, mean_flat + std_flat, alpha=0.5)
+    if has_q_learning:
+        plt.plot(eps_range, mean_q, label="Q-Learning")
+        plt.fill_between(eps_range, mean_q - std_q, mean_q + std_q, alpha=0.5)
 
     plt.xlabel("Number of Training Episodes", fontsize=28)
     plt.ylabel("Steps to Goal", fontsize=28)
@@ -240,12 +325,14 @@ def plot_acrobot_steps(args, save_dir="figures/eval/acrobot"):
     print(f"  Saved {save_dir}/acrobot_steps.png")
 
 
-def plot_acrobot_stability(args, save_dir="figures/eval/acrobot"):
-    """Plot relative stability bar chart (Hierarchy vs Flat)."""
+def plot_acrobot_stability(args, data_dir="data/eval/acrobot",
+                           save_dir="figures/eval/acrobot"):
+    """Plot relative stability bar chart (Hierarchy vs Flat vs Q-Learning)."""
     os.makedirs(save_dir, exist_ok=True)
 
-    hier_path = "data/eval/acrobot/SR_relative_stability_hierarchy.npy"
-    flat_path = "data/eval/acrobot/SR_relative_stability_flat.npy"
+    hier_path = os.path.join(data_dir, "SR_relative_stability_hierarchy.npy")
+    flat_path = os.path.join(data_dir, "SR_relative_stability_flat.npy")
+    q_learning_path = os.path.join(data_dir, "Q_relative_stability.npy")
 
     labels, means, sems = [], [], []
 
@@ -261,11 +348,17 @@ def plot_acrobot_stability(args, save_dir="figures/eval/acrobot"):
         means.append(float(np.mean(st)))
         sems.append(float(np.std(st) / np.sqrt(len(st))))
 
+    if os.path.exists(q_learning_path):
+        st = np.load(q_learning_path)
+        labels.append("Q-Learning")
+        means.append(float(np.mean(st)))
+        sems.append(float(np.std(st) / np.sqrt(len(st))))
+
     if len(labels) == 0:
         print("  No stability data found — skipping")
         return
 
-    color_map = {"Hierarchy": "C0", "Flat": "C1"}
+    color_map = {"Hierarchy": "C0", "Flat": "C1", "Q-Learning": "C2"}
     bar_colors = [color_map.get(label, "C0") for label in labels]
 
     fig = plt.figure(figsize=(10, 8))
@@ -287,13 +380,13 @@ if __name__ == "__main__":
     # Acrobot configuration
     n_theta_bins = 6
     n_dtheta_bins = 5
-    n_clusters = 6
-    gamma = 0.99
+    n_clusters = 4
+    gamma = 0.95
     nruns = 5
     eps = [1000, 2000, 5000, 10000, 15000, 20000]
     test_max_steps = 1000
 
-    parser = argparse.ArgumentParser(description="Acrobot Eval: Hierarchy vs Flat")
+    parser = argparse.ArgumentParser(description="Acrobot Eval: Hierarchy vs Flat vs Q-Learning")
     parser.add_argument("--train", action="store_true", help="Run experiments")
     parser.add_argument("--quick", action="store_true", help="Quick test")
     parser.add_argument("--n_runs", type=int, default=nruns)
@@ -323,18 +416,18 @@ if __name__ == "__main__":
             json.dump(vars(args), f, indent=2)
 
         print("=" * 60)
-        print("ACROBOT EVAL: Hierarchy vs Flat")
+        print("ACROBOT EVAL: Hierarchy vs Flat vs Q-Learning")
         print("=" * 60)
         print(f"State space: {n_theta_bins**2 * n_dtheta_bins**2} states")
         print(f"Runs: {args.n_runs}, Checkpoints: {args.episodes}")
 
         t0 = time.time()
-        SR_rewards_hier, SR_rewards_flat, SR_steps_hier, SR_steps_flat = \
+        SR_rewards_hier, SR_rewards_flat, Q_rewards, SR_steps_hier, SR_steps_flat, Q_steps = \
             acrobot_rewards_experiment(args)
         elapsed = time.time() - t0
         print(f"\nExperiment completed in {elapsed:.0f}s")
 
-        # Compute relative stability
+        # Compute relative stability for all three agent types
         SR_rel_stability_hier = np.array([
             relative_stability_paper_style(SR_rewards_hier[i, :])
             for i in range(SR_rewards_hier.shape[0])
@@ -343,14 +436,21 @@ if __name__ == "__main__":
             relative_stability_paper_style(SR_rewards_flat[i, :])
             for i in range(SR_rewards_flat.shape[0])
         ])
+        Q_rel_stability = np.array([
+            relative_stability_paper_style(Q_rewards[i, :])
+            for i in range(Q_rewards.shape[0])
+        ])
 
         # Save data
         np.save("data/eval/acrobot/SR_rewards_hierarchy.npy", SR_rewards_hier)
         np.save("data/eval/acrobot/SR_rewards_flat.npy", SR_rewards_flat)
+        np.save("data/eval/acrobot/Q_rewards.npy", Q_rewards)
         np.save("data/eval/acrobot/SR_steps_hierarchy.npy", SR_steps_hier)
         np.save("data/eval/acrobot/SR_steps_flat.npy", SR_steps_flat)
+        np.save("data/eval/acrobot/Q_steps.npy", Q_steps)
         np.save("data/eval/acrobot/SR_relative_stability_hierarchy.npy", SR_rel_stability_hier)
         np.save("data/eval/acrobot/SR_relative_stability_flat.npy", SR_rel_stability_flat)
+        np.save("data/eval/acrobot/Q_relative_stability.npy", Q_rel_stability)
         print("\nSaved all data to data/eval/acrobot/")
 
     else:
@@ -359,6 +459,23 @@ if __name__ == "__main__":
             with open("data/eval/acrobot/args.json", "r") as f:
                 saved = json.load(f)
                 args = argparse.Namespace(**saved)
+
+            # Reconcile episodes list with actual data shape.
+            # args.json may be stale if a --quick run overwrote .npy files
+            # but not args.json (or vice versa).
+            ref_path = os.path.join("data/eval/acrobot", "SR_rewards_hierarchy.npy")
+            if os.path.exists(ref_path):
+                n_data_cols = np.load(ref_path).shape[1]
+                if n_data_cols != len(args.episodes):
+                    print(f"  Warning: args.json lists {len(args.episodes)} episodes "
+                          f"but data has {n_data_cols} checkpoints.")
+                    print(f"  Re-run with --train to regenerate consistent data.")
+                    # Use evenly spaced placeholder x-values so plotting still works
+                    args.episodes = list(np.linspace(
+                        args.episodes[0], args.episodes[-1], n_data_cols, dtype=int
+                    ))
+                    print(f"  Using interpolated episode labels: {args.episodes}")
+
             print(f"Loaded args: {args}")
         else:
             print("No saved args found. Run with --train first.")
@@ -368,14 +485,16 @@ if __name__ == "__main__":
     print("GENERATING PLOTS")
     print("=" * 60)
 
-    os.makedirs("figures/eval/acrobot", exist_ok=True)
+    data_dir = "data/eval/acrobot"
+    save_dir = "figures/eval/acrobot"
+    os.makedirs(save_dir, exist_ok=True)
 
-    if os.path.exists("data/eval/acrobot/SR_rewards_hierarchy.npy"):
-        plot_acrobot_rewards(args)
+    if os.path.exists(os.path.join(data_dir, "SR_rewards_hierarchy.npy")):
+        plot_acrobot_rewards(args, data_dir=data_dir, save_dir=save_dir)
 
-    if os.path.exists("data/eval/acrobot/SR_steps_hierarchy.npy"):
-        plot_acrobot_steps(args)
+    if os.path.exists(os.path.join(data_dir, "SR_steps_hierarchy.npy")):
+        plot_acrobot_steps(args, data_dir=data_dir, save_dir=save_dir)
 
-    plot_acrobot_stability(args)
+    plot_acrobot_stability(args, data_dir=data_dir, save_dir=save_dir)
 
-    print("\nDone! Figures saved to figures/eval/acrobot/")
+    print(f"\nDone! Figures saved to {save_dir}/")

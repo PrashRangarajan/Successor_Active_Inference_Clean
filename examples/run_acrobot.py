@@ -24,10 +24,10 @@ def run_acrobot_example():
     """Run the hierarchical SR agent on Acrobot."""
 
     # Configuration
-    n_theta_bins = 6    # Number of bins for angles (theta1, theta2)
-    n_dtheta_bins = 5  # Number of bins for angular velocities (dtheta1, dtheta2)
-    n_clusters = 6       # Number of macro states
-    gamma = 0.99
+    n_theta_bins = 7    # Number of bins for angles (theta1, theta2)
+    n_dtheta_bins = 6  # Number of bins for angular velocities (dtheta1, dtheta2)
+    n_clusters = 4       # Number of macro states
+    gamma = 0.95
     learning_rate = 0.05
     train_episodes = 10000   # Episodes for learning dynamics
     test_max_steps = 1000   # Max steps per test episode
@@ -50,7 +50,8 @@ def run_acrobot_example():
     adapter = AcrobotAdapter(
         env,
         n_theta_bins=n_theta_bins,
-        n_dtheta_bins=n_dtheta_bins
+        n_dtheta_bins=n_dtheta_bins,
+        goal_velocity_filter=True,  # Reduce goal dilution for better planning
     )
 
     # Create unified agent
@@ -60,11 +61,13 @@ def run_acrobot_example():
         gamma=gamma,
         learning_rate=learning_rate,
         learn_from_experience=True,
+        train_smooth_steps=10,   # Multi-step to change discrete bins
+        test_smooth_steps=10,    # Match training dynamics at test time
     )
 
     # Set goal: default Acrobot terminal condition
     # -cos(theta1) - cos(theta1 + theta2) > 1.0
-    agent.set_goal(None, reward=100.0)
+    agent.set_goal(None, reward=100.0, default_cost=-1.0)
 
     print(f"Goal states: {len(agent.goal_states)} states")
 
@@ -85,7 +88,8 @@ def run_acrobot_example():
     adapter_test = AcrobotAdapter(
         env_test,
         n_theta_bins=n_theta_bins,
-        n_dtheta_bins=n_dtheta_bins
+        n_dtheta_bins=n_dtheta_bins,
+        goal_velocity_filter=True,
     )
     agent.adapter = adapter_test  # Switch to test adapter
 
@@ -208,11 +212,16 @@ def plot_macro_distribution(agent, save_path: str):
     print(f"  Saved macro distribution plot to {save_path}")
 
 
-def run_video_episode(agent, adapter, save_path: str, max_steps: int = 300):
+def run_video_episode(agent, adapter, save_path: str, max_steps: int = 300,
+                      smooth_steps: int = 10):
     """Run an episode and save video.
 
-    Uses the same goal check as the agent (discrete bin membership) so the
-    video termination matches the agent's reported reached_goal.
+    Mirrors the agent's run_episode_flat() logic so the video matches
+    the reported test results:
+    - Uses smooth stepping (repeats each action up to smooth_steps times
+      until the discrete bin changes), matching training/test dynamics.
+    - Handles is_terminal() returning None (goal_velocity_filter mode)
+      by falling back to discrete bin check only.
     """
     frames = []
     goal_states_set = set(agent.goal_states)
@@ -236,27 +245,33 @@ def run_video_episode(agent, adapter, save_path: str, max_steps: int = 300):
 
         best_action = np.argmax(V_adj)
 
-        # Take action
-        adapter.step(best_action)
-        frame = adapter.render()
-        if frame is not None:
-            frames.append(frame)
+        # Take action with smooth stepping (match agent's test_smooth_steps)
+        s_before = adapter.get_current_state_index()
+        for _ in range(smooth_steps):
+            adapter.step(best_action)
+            frame = adapter.render()
+            if frame is not None:
+                frames.append(frame)
+            s_after = adapter.get_current_state_index()
+            if s_after != s_before:
+                break
 
-        # Check terminal: require BOTH discrete goal bin AND continuous terminal
+        # Check terminal — handle is_terminal() returning None
         s_idx = adapter.get_current_state_index()
         in_goal_bin = s_idx in goal_states_set
         continuous_terminal = adapter.is_terminal()
 
-        if in_goal_bin and continuous_terminal:
+        if continuous_terminal is None:
+            # goal_velocity_filter mode: rely on discrete bin check only
+            if in_goal_bin:
+                done = True
+                print(f"  Step {steps}: Reached goal (discrete bin)")
+        elif in_goal_bin and continuous_terminal:
             done = True
             print(f"  Step {steps}: Reached goal (bin + continuous agree)")
         elif continuous_terminal:
-            # Continuous says terminal but discrete bin doesn't match
             done = True
             print(f"  Step {steps}: Continuous terminal (not in goal bin — edge case)")
-        elif in_goal_bin:
-            # In goal bin but continuous state not yet terminal — keep going
-            pass
 
         steps += 1
 
@@ -265,7 +280,7 @@ def run_video_episode(agent, adapter, save_path: str, max_steps: int = 300):
 
     if frames:
         imageio.mimsave(save_path, frames, fps=30, macro_block_size=1)
-        print(f"  Saved video to {save_path} ({steps} steps)")
+        print(f"  Saved video to {save_path} ({steps} steps, {len(frames)} frames)")
     else:
         print("  No frames to save")
 

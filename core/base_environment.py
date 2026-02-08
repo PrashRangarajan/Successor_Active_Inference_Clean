@@ -129,6 +129,18 @@ class BaseEnvironmentAdapter(ABC):
         """Get current state as flat index."""
         pass
 
+    def get_state_for_reset(self) -> Any:
+        """Get current state in a format suitable for passing to reset().
+
+        By default, returns get_current_state(). Override in adapters where
+        reset() expects a different format (e.g., continuous observations
+        rather than discrete bin indices).
+
+        Returns:
+            State representation that can be passed to self.reset()
+        """
+        return self.get_current_state()
+
     # ==================== Matrix Operations ====================
 
     @abstractmethod

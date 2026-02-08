@@ -1,0 +1,15 @@
+{
+  "n_theta_bins": 6,
+  "n_dtheta_bins": 5,
+  "n_clusters": 4,
+  "gamma": 0.95,
+  "n_runs": 2,
+  "episodes": [
+    1000,
+    5000,
+    10000
+  ],
+  "test_max_steps": 1000,
+  "use_replay": true,
+  "n_replay_epochs": 10
+}

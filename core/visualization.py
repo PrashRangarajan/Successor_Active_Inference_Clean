@@ -42,12 +42,16 @@ class VisualizationMixin:
 
     # ==================== Matrix Visualization ====================
 
-    def view_matrices(self, save_dir: str = None, learned: bool = True):
+    def view_matrices(self, save_dir: str = None, learned: bool = True,
+                      origin_state: Optional[int] = None):
         """Visualize transition and successor matrices.
 
         Args:
             save_dir: Directory to save figures (e.g. 'figures/gridworld/matrices')
             learned: Whether matrices were learned (vs analytical)
+            origin_state: Origin state index for M-from-origin plot.
+                         For grid environments this is the base location index
+                         (row * grid_size + col). If None, defaults to 0.
         """
         if save_dir is None:
             raise ValueError("save_dir is required (e.g. 'figures/gridworld/matrices')")
@@ -72,7 +76,8 @@ class VisualizationMixin:
 
             # Plot M from origin state
             self._plot_M_from_origin(self.M, n_states,
-                                    f"{save_dir}/m_origin_{learn_str}.png")
+                                    f"{save_dir}/m_origin_{learn_str}.png",
+                                    origin_state=origin_state)
 
             # Save M matrix
             os.makedirs("data", exist_ok=True)
@@ -118,8 +123,16 @@ class VisualizationMixin:
         plt.savefig(save_path, format="png", bbox_inches='tight')
         plt.close()
 
-    def _plot_M_from_origin(self, M: np.ndarray, n_states: int, save_path: str):
-        """Plot successor representation from origin state.
+    def _plot_M_from_origin(self, M: np.ndarray, n_states: int, save_path: str,
+                            origin_state: Optional[int] = None):
+        """Plot successor representation from a given origin state.
+
+        Args:
+            M: Successor matrix (2D or 4D for augmented state spaces)
+            n_states: Number of states
+            save_path: Path to save the figure
+            origin_state: Origin state index (base location index for grid envs).
+                         If None, defaults to 0 (top-left corner).
 
         For augmented state spaces (e.g., key gridworld), creates a 2x2 grid showing
         M from origin for all combinations of (origin_key_state, target_key_state):
@@ -133,18 +146,25 @@ class VisualizationMixin:
 
         grid_size = self.adapter.grid_size
 
+        if origin_state is None:
+            origin_state = 0
+
+        # Convert origin index to (x, y) for title
+        origin_x, origin_y = divmod(origin_state, grid_size)
+
         if M.ndim == 4:
             # Augmented state space (e.g., key gridworld)
             # M shape: (N, 2, N, 2) where 2 is n_augment (has_key in {0, 1})
             n_augment = M.shape[1]
 
             fig, axes = plt.subplots(n_augment, n_augment, figsize=(12, 10))
-            fig.suptitle('Successor Representation from Origin (0,0)', fontsize=16)
+            fig.suptitle(f'Successor Representation from ({origin_x},{origin_y})', fontsize=16)
 
             aug_labels = ["No Key", "Has Key"] if n_augment == 2 else [f"Aug {i}" for i in range(n_augment)]
 
             # Find global max for consistent color scaling
-            global_max = max(M[0, i, :, j].max() for i in range(n_augment) for j in range(n_augment))
+            global_max = max(M[origin_state, i, :, j].max()
+                           for i in range(n_augment) for j in range(n_augment))
             global_max = global_max if global_max > 0 else 1
 
             for origin_aug in range(n_augment):
@@ -152,32 +172,39 @@ class VisualizationMixin:
                     ax = axes[origin_aug, target_aug] if n_augment > 1 else axes
 
                     # M[origin_loc, origin_aug, target_loc, target_aug]
-                    # Get M from origin (0,0) with origin_aug to all locations with target_aug
-                    M_slice = M[0, origin_aug, :, target_aug].reshape(grid_size, grid_size).T
+                    M_slice = M[origin_state, origin_aug, :, target_aug].reshape(grid_size, grid_size).T
 
                     im = ax.imshow(M_slice, aspect='equal', cmap='copper',
                                    norm=LogNorm(vmin=0.01, vmax=global_max))
-                    ax.set_title(f'{aug_labels[origin_aug]} → {aug_labels[target_aug]}', fontsize=12)
+                    ax.set_title(f'{aug_labels[origin_aug]} \u2192 {aug_labels[target_aug]}', fontsize=12)
                     ax.set_xticks(np.arange(grid_size))
                     ax.set_yticks(np.arange(grid_size))
 
+                    # Mark origin state
+                    ax.plot(origin_y, origin_x, marker='*', color='cyan',
+                            markersize=15, markeredgecolor='white', markeredgewidth=1)
+
             # Add colorbar
             fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.6)
-            plt.tight_layout()
             plt.savefig(save_path, format="png", bbox_inches='tight')
             plt.close()
         else:
             # Standard state space
-            M_orig = M[0, :].reshape(grid_size, grid_size).T
+            M_orig = M[origin_state, :].reshape(grid_size, grid_size).T
 
             plt.figure(figsize=(8, 8))
             vmax = M_orig.max() if M_orig.max() > 0 else 1
             plt.imshow(M_orig, aspect='equal', cmap='copper',
                        norm=LogNorm(vmin=0.01, vmax=vmax))
             plt.colorbar()
-            plt.title('Successor Representation from Origin (0,0)', fontsize=14)
+            plt.title(f'Successor Representation from ({origin_x},{origin_y})', fontsize=14)
             plt.xticks(np.arange(grid_size), fontsize=12)
             plt.yticks(np.arange(grid_size), fontsize=12)
+
+            # Mark origin state
+            plt.plot(origin_y, origin_x, marker='*', color='cyan',
+                     markersize=15, markeredgecolor='white', markeredgewidth=1)
+
             plt.savefig(save_path, format="png", bbox_inches='tight')
             plt.close()
 
@@ -1177,13 +1204,20 @@ class VisualizationMixin:
 
     def show_video(self, save_path: str = None,
                    init_loc: Tuple[int, int] = None,
-                   goal_loc: Tuple[int, int] = None):
+                   goal_loc: Tuple[int, int] = None,
+                   key_loc: Tuple[int, int] = None):
         """Generate video of episode trajectory.
+
+        For key gridworld environments, shows:
+        - Key pickup status indicator (color changes when key is acquired)
+        - Pre-key path in one color, post-key path in another
+        - Backtracking detection (revisited cells highlighted)
 
         Args:
             save_path: Path to save the video (e.g. 'figures/gridworld/episode_video.mp4')
             init_loc: Starting location
             goal_loc: Goal location
+            key_loc: Key location (optional, auto-detected for key gridworlds)
         """
         if save_path is None:
             raise ValueError("save_path is required (e.g. 'figures/gridworld/episode_video.mp4')")
@@ -1205,6 +1239,9 @@ class VisualizationMixin:
         if goal_loc is None:
             goal_loc = (grid_size - 1, grid_size - 1)
 
+        # Detect augmented (key) state space
+        is_augmented = hasattr(self.adapter, 'state_space') and hasattr(self.adapter.state_space, 'n_augment')
+
         # Get wall locations using render_state for correct (x, y) coordinates
         walls = self.adapter.get_wall_indices() if hasattr(self.adapter, 'get_wall_indices') else []
         wall_locs = set()
@@ -1213,8 +1250,9 @@ class VisualizationMixin:
             wall_locs.add((loc[0], loc[1]))
         wall_locs = list(wall_locs)
 
-        # Convert state history to locations
+        # Convert state history to locations and key status
         state_locs = []
+        has_key_history = []
         for state in self.state_history:
             if hasattr(self.adapter, 'onehot_to_index'):
                 idx = self.adapter.onehot_to_index(state)
@@ -1223,21 +1261,40 @@ class VisualizationMixin:
             loc = self.adapter.render_state(idx)
             state_locs.append((loc[0], loc[1]))
 
-        # Setup figure
-        fig = plt.figure(figsize=(8, 8))
-        grid = np.zeros((grid_size, grid_size))
+            # Extract key status from augmented state
+            if is_augmented and len(loc) >= 3:
+                has_key_history.append(int(loc[2]))
+            else:
+                has_key_history.append(None)
 
+        # Find the step where key was picked up
+        key_pickup_step = None
+        if is_augmented:
+            for i, hk in enumerate(has_key_history):
+                if hk == 1:
+                    key_pickup_step = i
+                    break
+
+        # Detect backtracking: cells visited more than once
+        visit_counts = {}
+        for i, loc in enumerate(state_locs):
+            visit_counts[loc] = visit_counts.get(loc, 0) + 1
+
+        # Setup figure
+        fig, ax = plt.subplots(figsize=(8, 8))
+
+        grid = np.zeros((grid_size, grid_size))
         if wall_locs:
             wall_idx = tuple(np.array(wall_locs).T)
             grid[wall_idx] = 0.25
-
         grid[init_loc] = 1
         grid[goal_loc] = 0.5
 
-        im = plt.imshow(grid.T, aspect='equal', cmap='magma')
-        plt.title(f'Gridworld Episode')
+        im = ax.imshow(grid.T, aspect='equal', cmap='magma')
 
-        ax = plt.gca()
+        # Title with key status indicator
+        title_text = ax.set_title('Gridworld Episode', fontsize=14)
+
         ax.set_xticks(np.arange(0, grid_size, 1))
         ax.set_yticks(np.arange(0, grid_size, 1))
         ax.set_xticks(np.arange(-0.5, grid_size, 1), minor=True)
@@ -1245,7 +1302,14 @@ class VisualizationMixin:
         ax.grid(which='minor', color='w', linestyle='-', linewidth=2)
         ax.tick_params(which='minor', bottom=False, left=False)
 
-        past_idx_array = []
+        # Colors for pre/post key paths
+        pre_key_color = '#FFA500'   # Orange for path before key
+        post_key_color = '#00BFFF'  # Deep sky blue for path after key
+        backtrack_color = '#FF4444'  # Red for backtracking
+
+        past_locs = []
+        past_has_key = []
+        scatter_objects = []
 
         def init():
             grid = np.zeros((grid_size, grid_size))
@@ -1258,35 +1322,114 @@ class VisualizationMixin:
             return im,
 
         def animate(i):
+            # Clear previous text and scatter
             for txt in ax.texts[::-1]:
                 txt.remove()
+            for sc in scatter_objects:
+                sc.remove()
+            scatter_objects.clear()
 
             grid = np.zeros((grid_size, grid_size))
             if wall_locs:
                 for w in wall_locs:
                     grid[w] = 0.25
 
-            s_idx = state_locs[i]
-            grid[s_idx] = 1
+            s_loc = state_locs[i]
+            grid[s_loc] = 1
             grid[goal_loc] = 0.5
             im.set_data(grid.T)
 
-            past_idx_array.append(s_idx)
+            past_locs.append(s_loc)
+            past_has_key.append(has_key_history[i])
 
-            ax.text(s_idx[0], s_idx[1], 'Agent', fontsize=10,
-                    ha="center", va="center", color="b")
+            # Update title with key status and step count
+            if is_augmented:
+                hk = has_key_history[i]
+                if hk == 1:
+                    key_str = '\U0001f511 Has Key'  # 🔑
+                    title_color = '#00BFFF'
+                else:
+                    key_str = '\U0001f512 No Key'   # 🔒
+                    title_color = '#FFA500'
+                title_text.set_text(f'Step {i}/{len(state_locs)-1}  |  {key_str}')
+                title_text.set_color(title_color)
+            else:
+                title_text.set_text(f'Gridworld Episode  |  Step {i}/{len(state_locs)-1}')
+
+            # Draw past positions with color coding
+            if i > 0:
+                # Count visits up to current step for backtracking detection
+                visits_so_far = {}
+                for j in range(i):
+                    loc = past_locs[j]
+                    visits_so_far[loc] = visits_so_far.get(loc, 0) + 1
+
+                for j in range(i):
+                    loc = past_locs[j]
+                    is_backtrack = visits_so_far.get(loc, 0) > 1
+
+                    if is_augmented:
+                        # Color by key status phase
+                        if is_backtrack:
+                            color = backtrack_color
+                            marker = 'x'
+                            size = 60
+                        elif past_has_key[j] == 1:
+                            color = post_key_color
+                            marker = 'o'
+                            size = 40
+                        else:
+                            color = pre_key_color
+                            marker = 'o'
+                            size = 40
+                    else:
+                        if is_backtrack:
+                            color = backtrack_color
+                            marker = 'x'
+                            size = 60
+                        else:
+                            color = 'yellow'
+                            marker = 'o'
+                            size = 40
+
+                    sc = ax.scatter(loc[0], loc[1], color=color, marker=marker,
+                                    s=size, zorder=5)
+                    scatter_objects.append(sc)
+
+            # Draw agent label
+            agent_color = '#00BFFF' if (is_augmented and has_key_history[i] == 1) else 'b'
+            ax.text(s_loc[0], s_loc[1], 'Agent', fontsize=10,
+                    ha="center", va="center", color=agent_color,
+                    fontweight='bold', zorder=10)
             ax.text(goal_loc[0], goal_loc[1], 'Goal', fontsize=10,
                     ha="center", va="center", color="w")
+
+            # Show key location if available and key not yet picked up
+            if key_loc is not None and (not is_augmented or has_key_history[i] == 0):
+                ax.text(key_loc[0], key_loc[1], '\U0001f511', fontsize=16,
+                        ha="center", va="center", zorder=8)
 
             for w in wall_locs:
                 ax.text(w[0], w[1], 'Wall', fontsize=8,
                         ha="center", va="center", color="w")
 
-            if i > 0:
-                ax.scatter(past_idx_array[i-1][0], past_idx_array[i-1][1], color='y')
-
             if i == len(state_locs) - 1:
-                # Save final frame
+                # Build legend for final frame
+                legend_elements = []
+                if is_augmented:
+                    legend_elements.append(mpatches.Patch(color=pre_key_color, label='Path (no key)'))
+                    legend_elements.append(mpatches.Patch(color=post_key_color, label='Path (has key)'))
+                else:
+                    legend_elements.append(mpatches.Patch(color='yellow', label='Path'))
+                if any(visit_counts.get(loc, 0) > 1 for loc in past_locs):
+                    legend_elements.append(plt.Line2D([0], [0], marker='x', color='w',
+                                           markerfacecolor=backtrack_color,
+                                           markeredgecolor=backtrack_color,
+                                           markersize=10, label='Backtracking', linestyle='None'))
+                ax.legend(handles=legend_elements, loc='upper right', fontsize=9,
+                          framealpha=0.8)
+
+                # Save final frame as trajectory image
                 traj_path = save_path.replace('.mp4', '_trajectory.png')
                 plt.savefig(traj_path)
 
