@@ -42,13 +42,15 @@ class VisualizationMixin:
 
     # ==================== Matrix Visualization ====================
 
-    def view_matrices(self, save_dir: str = "figures/matrices", learned: bool = True):
+    def view_matrices(self, save_dir: str = None, learned: bool = True):
         """Visualize transition and successor matrices.
 
         Args:
-            save_dir: Directory to save figures
+            save_dir: Directory to save figures (e.g. 'figures/gridworld/matrices')
             learned: Whether matrices were learned (vs analytical)
         """
+        if save_dir is None:
+            raise ValueError("save_dir is required (e.g. 'figures/gridworld/matrices')")
         os.makedirs(save_dir, exist_ok=True)
         learn_str = 'estimated' if learned else 'actual'
 
@@ -241,12 +243,14 @@ class VisualizationMixin:
 
     # ==================== Clustering Visualization ====================
 
-    def visualize_clusters(self, save_dir: str = "figures/clustering"):
+    def visualize_clusters(self, save_dir: str = None):
         """Visualize macro state clusters.
 
         Args:
-            save_dir: Directory to save figures
+            save_dir: Directory to save figures (e.g. 'figures/gridworld/clustering')
         """
+        if save_dir is None:
+            raise ValueError("save_dir is required (e.g. 'figures/gridworld/clustering')")
         os.makedirs(save_dir, exist_ok=True)
 
         if not hasattr(self.adapter, 'grid_size'):
@@ -457,7 +461,7 @@ class VisualizationMixin:
         self,
         positions: List[float],
         velocities: List[float],
-        save_path: str = "figures/trajectory_macro.png",
+        save_path: str = None,
     ):
         """Plot a 2D phase-space trajectory colored by macro state membership.
 
@@ -468,8 +472,10 @@ class VisualizationMixin:
         Args:
             positions: Continuous dim-0 values (e.g. position / angle) per step.
             velocities: Continuous dim-1 values (e.g. velocity / angular vel) per step.
-            save_path: Path to save the figure.
+            save_path: Path to save the figure (e.g. 'figures/mountaincar/trajectory_macro.png').
         """
+        if save_path is None:
+            raise ValueError("save_path is required (e.g. 'figures/mountaincar/trajectory_macro.png')")
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
         if hasattr(self.adapter, 'get_dimension_labels'):
@@ -533,7 +539,7 @@ class VisualizationMixin:
         positions: List[float],
         velocities: List[float],
         actions: List[int],
-        save_path: str = "figures/trajectory_actions.png",
+        save_path: str = None,
     ):
         """Plot phase-space trajectory colored by action taken at each step.
 
@@ -541,8 +547,10 @@ class VisualizationMixin:
             positions: List of position values along the trajectory.
             velocities: List of velocity values along the trajectory.
             actions: List of action indices (one per decision step).
-            save_path: Output file path.
+            save_path: Output file path (e.g. 'figures/mountaincar/trajectory_actions.png').
         """
+        if save_path is None:
+            raise ValueError("save_path is required (e.g. 'figures/mountaincar/trajectory_actions.png')")
         import matplotlib.colors as mcolors
 
         # Get axis labels from adapter
@@ -612,7 +620,7 @@ class VisualizationMixin:
         positions: List[float],
         velocities: List[float],
         stage_idx: Optional[List[int]] = None,
-        save_path: str = "figures/stage_diagram.png",
+        save_path: str = None,
         annotate_state: bool = True,
     ):
         """Create a composite figure linking environment snapshots to phase-space states.
@@ -626,9 +634,11 @@ class VisualizationMixin:
             velocities: Continuous dim-1 value per timestep.
             stage_idx: Indices into the trajectory to snapshot.
                        If None, auto-selects [start, valley/extremum, goal/end].
-            save_path: Output PNG path.
+            save_path: Output PNG path (e.g. 'figures/mountaincar/stage_diagram.png').
             annotate_state: If True, overlay coordinate text on each snapshot.
         """
+        if save_path is None:
+            raise ValueError("save_path is required (e.g. 'figures/mountaincar/stage_diagram.png')")
         from matplotlib.gridspec import GridSpec
 
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
@@ -706,7 +716,7 @@ class VisualizationMixin:
         frames: List[np.ndarray],
         positions: List[float],
         velocities: List[float],
-        save_path: str = "figures/combined_vertical.mp4",
+        save_path: str = None,
         fps: int = 30,
     ):
         """Generate a vertically stacked video: environment render (top) + animated trajectory (bottom).
@@ -719,9 +729,11 @@ class VisualizationMixin:
             frames: RGB frames from env.render(), one per decision step.
             positions: Continuous dim-0 values per decision step.
             velocities: Continuous dim-1 values per decision step.
-            save_path: Output MP4 path.
+            save_path: Output MP4 path (e.g. 'figures/mountaincar/combined_vertical.mp4').
             fps: Frames per second for the output video.
         """
+        if save_path is None:
+            raise ValueError("save_path is required (e.g. 'figures/mountaincar/combined_vertical.mp4')")
         from matplotlib.collections import LineCollection
         from PIL import Image as PILImage
         from io import BytesIO
@@ -848,16 +860,18 @@ class VisualizationMixin:
 
     # ==================== Trajectory Visualization ====================
 
-    def show_actions(self, save_path: str = "figures/Actions_taken.png",
+    def show_actions(self, save_path: str = None,
                      init_loc: Tuple[int, int] = None,
                      goal_loc: Tuple[int, int] = None):
         """Visualize actions taken during an episode.
 
         Args:
-            save_path: Path to save the figure
+            save_path: Path to save the figure (e.g. 'figures/gridworld/Actions_taken.png')
             init_loc: Starting location (default: (0,0))
             goal_loc: Goal location (default: bottom-right corner)
         """
+        if save_path is None:
+            raise ValueError("save_path is required (e.g. 'figures/gridworld/Actions_taken.png')")
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
         if not hasattr(self.adapter, 'grid_size'):
@@ -876,18 +890,17 @@ class VisualizationMixin:
         if goal_loc is None:
             goal_loc = (grid_size - 1, grid_size - 1)
 
-        # Get wall locations using render_state for correct (x, y) coordinates
+        # Get wall locations as (x, y) grid coordinates
         walls = self.adapter.get_wall_indices() if hasattr(self.adapter, 'get_wall_indices') else []
-        wall_locs = set()
-        for w in walls:
-            loc = self.adapter.render_state(w)
-            wall_locs.add((loc[0], loc[1]))  # take only (x, y), ignore augmented dims
+        wall_locs = [self.adapter.state_space.index_to_state(w) for w in walls] if walls else []
 
         # Create grid
         grid = np.zeros((grid_size, grid_size))
         grid[init_loc] = 1
-        for w in wall_locs:
-            grid[w] = 2
+        if wall_locs:
+            for w in wall_locs:
+                if len(w) == 2:
+                    grid[w] = 2
         grid[goal_loc] = 0.5
 
         # Build arrows grid
@@ -943,7 +956,7 @@ class VisualizationMixin:
 
     # ==================== Policy Visualization ====================
 
-    def visualize_policy(self, save_dir: str = "figures/Macro Action Network"):
+    def visualize_policy(self, save_dir: str = None):
         """Visualize macro action policies.
 
         For each macro state transition, shows the micro-level actions
@@ -953,8 +966,10 @@ class VisualizationMixin:
         panels for each augment value (No Key / Has Key).
 
         Args:
-            save_dir: Directory to save figures
+            save_dir: Directory to save figures (e.g. 'figures/gridworld/macro_action_network')
         """
+        if save_dir is None:
+            raise ValueError("save_dir is required (e.g. 'figures/gridworld/macro_action_network')")
         os.makedirs(save_dir, exist_ok=True)
 
         if not hasattr(self.adapter, 'grid_size'):
@@ -1159,16 +1174,18 @@ class VisualizationMixin:
 
     # ==================== Video Generation ====================
 
-    def show_video(self, save_path: str = "videos/env_micro.mp4",
+    def show_video(self, save_path: str = None,
                    init_loc: Tuple[int, int] = None,
                    goal_loc: Tuple[int, int] = None):
         """Generate video of episode trajectory.
 
         Args:
-            save_path: Path to save the video
+            save_path: Path to save the video (e.g. 'figures/gridworld/episode_video.mp4')
             init_loc: Starting location
             goal_loc: Goal location
         """
+        if save_path is None:
+            raise ValueError("save_path is required (e.g. 'figures/gridworld/episode_video.mp4')")
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
         if not hasattr(self.adapter, 'grid_size'):
@@ -1282,12 +1299,14 @@ class VisualizationMixin:
 
     # ==================== Value Function Visualization ====================
 
-    def visualize_value_function(self, save_path: str = "figures/value_function.png"):
+    def visualize_value_function(self, save_path: str = None):
         """Visualize the value function on the grid.
 
         Args:
-            save_path: Path to save the figure
+            save_path: Path to save the figure (e.g. 'figures/gridworld/value_function.png')
         """
+        if save_path is None:
+            raise ValueError("save_path is required (e.g. 'figures/gridworld/value_function.png')")
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
         if not hasattr(self.adapter, 'grid_size'):
@@ -1335,14 +1354,16 @@ class VisualizationMixin:
         """Check if the adapter is a POMDP adapter with observation model."""
         return hasattr(self.adapter, 'observation_model')
 
-    def visualize_observation_entropy(self, save_path: str = "figures/pomdp/observation_entropy.png"):
+    def visualize_observation_entropy(self, save_path: str = None):
         """Visualize per-state observation entropy on the grid.
 
         High entropy states have noisier observations (harder to localize).
 
         Args:
-            save_path: Path to save the figure
+            save_path: Path to save the figure (e.g. 'figures/pomdp_gridworld/observation_entropy.png')
         """
+        if save_path is None:
+            raise ValueError("save_path is required (e.g. 'figures/pomdp_gridworld/observation_entropy.png')")
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
         if not self._is_pomdp():
@@ -1376,7 +1397,7 @@ class VisualizationMixin:
         plt.close()
         print(f"Observation entropy saved to {save_path}")
 
-    def visualize_observation_model(self, save_dir: str = "figures/pomdp",
+    def visualize_observation_model(self, save_dir: str = None,
                                      states_to_show: Optional[List[int]] = None):
         """Visualize P(obs|state) for selected states.
 
@@ -1384,10 +1405,12 @@ class VisualizationMixin:
         revealing which states have clean vs noisy observation profiles.
 
         Args:
-            save_dir: Directory to save figures
+            save_dir: Directory to save figures (e.g. 'figures/pomdp_gridworld')
             states_to_show: List of state indices to visualize.
                 If None, auto-selects representative states.
         """
+        if save_dir is None:
+            raise ValueError("save_dir is required (e.g. 'figures/pomdp_gridworld')")
         os.makedirs(save_dir, exist_ok=True)
 
         if not self._is_pomdp():
@@ -1456,7 +1479,7 @@ class VisualizationMixin:
         plt.close()
         print(f"Observation model saved to {save_dir}/observation_model.png")
 
-    def visualize_noise_zones(self, save_path: str = "figures/pomdp/noise_zones.png",
+    def visualize_noise_zones(self, save_path: str = None,
                                init_loc: Optional[Tuple[int, int]] = None,
                                goal_loc: Optional[Tuple[int, int]] = None):
         """Visualize POMDP environment overview with noise zones highlighted.
@@ -1464,10 +1487,12 @@ class VisualizationMixin:
         Shows entropy heatmap with noisy zones outlined, goal, start, and walls.
 
         Args:
-            save_path: Path to save the figure
+            save_path: Path to save the figure (e.g. 'figures/pomdp_gridworld/noise_zones.png')
             init_loc: Agent start location (default: (0,0))
             goal_loc: Goal location (default: bottom-right corner)
         """
+        if save_path is None:
+            raise ValueError("save_path is required (e.g. 'figures/pomdp_gridworld/noise_zones.png')")
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
         if not self._is_pomdp():
@@ -1530,7 +1555,7 @@ class VisualizationMixin:
         plt.close()
         print(f"Noise zones saved to {save_path}")
 
-    def visualize_pomdp_value_comparison(self, save_path: str = "figures/pomdp/value_comparison.png",
+    def visualize_pomdp_value_comparison(self, save_path: str = None,
                                           beta: float = 1.0):
         """Compare pragmatic, epistemic, and combined value functions.
 
@@ -1540,9 +1565,11 @@ class VisualizationMixin:
         - Combined: expected free energy used by the POMDP agent
 
         Args:
-            save_path: Path to save the figure
+            save_path: Path to save the figure (e.g. 'figures/pomdp_gridworld/value_comparison.png')
             beta: Weight for epistemic value (should match experiment setting)
         """
+        if save_path is None:
+            raise ValueError("save_path is required (e.g. 'figures/pomdp_gridworld/value_comparison.png')")
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
         if not self._is_pomdp():
@@ -1600,7 +1627,7 @@ class VisualizationMixin:
         plt.close()
         print(f"Value comparison saved to {save_path}")
 
-    def visualize_belief_trajectory(self, save_dir: str = "figures/pomdp",
+    def visualize_belief_trajectory(self, save_dir: str = None,
                                      max_steps: Optional[int] = None):
         """Visualize belief vs true state over an episode trajectory.
 
@@ -1610,9 +1637,11 @@ class VisualizationMixin:
         3. Accuracy timeline (green=correct, red=mismatch)
 
         Args:
-            save_dir: Directory to save figures
+            save_dir: Directory to save figures (e.g. 'figures/pomdp_gridworld')
             max_steps: Maximum number of steps to show (None for all)
         """
+        if save_dir is None:
+            raise ValueError("save_dir is required (e.g. 'figures/pomdp_gridworld')")
         os.makedirs(save_dir, exist_ok=True)
 
         if not self._is_pomdp():
