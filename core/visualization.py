@@ -876,17 +876,18 @@ class VisualizationMixin:
         if goal_loc is None:
             goal_loc = (grid_size - 1, grid_size - 1)
 
-        # Get wall locations
+        # Get wall locations using render_state for correct (x, y) coordinates
         walls = self.adapter.get_wall_indices() if hasattr(self.adapter, 'get_wall_indices') else []
-        wall_locs = [self.adapter.state_space.index_to_state(w) for w in walls] if walls else []
+        wall_locs = set()
+        for w in walls:
+            loc = self.adapter.render_state(w)
+            wall_locs.add((loc[0], loc[1]))  # take only (x, y), ignore augmented dims
 
         # Create grid
         grid = np.zeros((grid_size, grid_size))
         grid[init_loc] = 1
-        if wall_locs:
-            for w in wall_locs:
-                if len(w) == 2:
-                    grid[w] = 2
+        for w in wall_locs:
+            grid[w] = 2
         grid[goal_loc] = 0.5
 
         # Build arrows grid
@@ -901,9 +902,8 @@ class VisualizationMixin:
             else:
                 idx = np.argmax(state.flatten())
 
-            loc = self.adapter.state_space.index_to_state(idx)
-            if len(loc) == 2:
-                arrows_grid[loc] = action
+            loc = self.adapter.render_state(idx)
+            arrows_grid[loc[0], loc[1]] = action
 
         arrows_grid = arrows_grid.T
 
@@ -1187,13 +1187,13 @@ class VisualizationMixin:
         if goal_loc is None:
             goal_loc = (grid_size - 1, grid_size - 1)
 
-        # Get wall locations
+        # Get wall locations using render_state for correct (x, y) coordinates
         walls = self.adapter.get_wall_indices() if hasattr(self.adapter, 'get_wall_indices') else []
-        wall_locs = []
+        wall_locs = set()
         for w in walls:
-            loc = self.adapter.state_space.index_to_state(w)
-            if len(loc) == 2:
-                wall_locs.append(loc)
+            loc = self.adapter.render_state(w)
+            wall_locs.add((loc[0], loc[1]))
+        wall_locs = list(wall_locs)
 
         # Convert state history to locations
         state_locs = []
@@ -1202,9 +1202,8 @@ class VisualizationMixin:
                 idx = self.adapter.onehot_to_index(state)
             else:
                 idx = np.argmax(state.flatten())
-            loc = self.adapter.state_space.index_to_state(idx)
-            if len(loc) >= 2:
-                state_locs.append((loc[0], loc[1]))
+            loc = self.adapter.render_state(idx)
+            state_locs.append((loc[0], loc[1]))
 
         # Setup figure
         fig = plt.figure(figsize=(8, 8))
@@ -1321,10 +1320,9 @@ class VisualizationMixin:
         # Mark goal
         if self.goal_states:
             for gs in self.goal_states:
-                loc = self.adapter.state_space.index_to_state(gs)
-                if len(loc) >= 2:
-                    plt.scatter(loc[0], loc[1], color='red', s=200, marker='*',
-                               label='Goal' if gs == self.goal_states[0] else '')
+                loc = self.adapter.render_state(gs)
+                plt.scatter(loc[0], loc[1], color='red', s=200, marker='*',
+                           label='Goal' if gs == self.goal_states[0] else '')
 
         plt.legend()
         plt.savefig(save_path, bbox_inches='tight')
@@ -1366,10 +1364,9 @@ class VisualizationMixin:
 
         # Mark walls
         for w in walls:
-            loc = self.adapter.state_space.index_to_state(w)
-            if len(loc) >= 2:
-                ax.add_patch(plt.Rectangle((loc[0] - 0.5, loc[1] - 0.5), 1, 1,
-                                           facecolor='black', edgecolor='white', linewidth=1))
+            loc = self.adapter.render_state(w)
+            ax.add_patch(plt.Rectangle((loc[0] - 0.5, loc[1] - 0.5), 1, 1,
+                                       facecolor='black', edgecolor='white', linewidth=1))
 
         ax.set_xticks(np.arange(grid_size))
         ax.set_yticks(np.arange(grid_size))
@@ -1488,7 +1485,8 @@ class VisualizationMixin:
             init_loc = (0, 0)
         if goal_loc is None:
             if self.goal_states:
-                goal_loc = self.adapter.state_space.index_to_state(self.goal_states[0])
+                loc = self.adapter.render_state(self.goal_states[0])
+                goal_loc = (loc[0], loc[1])
             else:
                 goal_loc = (grid_size - 1, grid_size - 1)
 
@@ -1501,18 +1499,16 @@ class VisualizationMixin:
         threshold = entropy_vals.mean() + entropy_vals.std()
         for idx in range(len(entropy_vals)):
             if entropy_vals[idx] > threshold:
-                loc = self.adapter.state_space.index_to_state(idx)
-                if len(loc) >= 2:
-                    ax.add_patch(plt.Rectangle((loc[0] - 0.5, loc[1] - 0.5), 1, 1,
-                                               facecolor='none', edgecolor='red',
-                                               linewidth=2.5, linestyle='--'))
+                loc = self.adapter.render_state(idx)
+                ax.add_patch(plt.Rectangle((loc[0] - 0.5, loc[1] - 0.5), 1, 1,
+                                           facecolor='none', edgecolor='red',
+                                           linewidth=2.5, linestyle='--'))
 
         # Mark walls
         for w in walls:
-            loc = self.adapter.state_space.index_to_state(w)
-            if len(loc) >= 2:
-                ax.add_patch(plt.Rectangle((loc[0] - 0.5, loc[1] - 0.5), 1, 1,
-                                           facecolor='black', edgecolor='white', linewidth=1))
+            loc = self.adapter.render_state(w)
+            ax.add_patch(plt.Rectangle((loc[0] - 0.5, loc[1] - 0.5), 1, 1,
+                                       facecolor='black', edgecolor='white', linewidth=1))
 
         # Mark start and goal
         ax.scatter(init_loc[0], init_loc[1], color='blue', s=250, marker='o',
@@ -1594,10 +1590,9 @@ class VisualizationMixin:
             # Mark goal
             if self.goal_states:
                 for gs in self.goal_states:
-                    loc = self.adapter.state_space.index_to_state(gs)
-                    if len(loc) >= 2:
-                        ax.scatter(loc[0], loc[1], color='red', s=200, marker='*',
-                                  zorder=5, edgecolors='white', linewidths=1)
+                    loc = self.adapter.render_state(gs)
+                    ax.scatter(loc[0], loc[1], color='red', s=200, marker='*',
+                              zorder=5, edgecolors='white', linewidths=1)
 
         fig.suptitle("POMDP Value Decomposition", fontsize=16, y=1.02)
         plt.tight_layout()

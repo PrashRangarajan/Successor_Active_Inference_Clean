@@ -679,11 +679,12 @@ class HierarchicalSRAgent(VisualizationMixin):
         blurry expected values and make poor action choices.  This method
         converts the belief to a clean one-hot at the MAP estimate so the
         micro-level planner can differentiate actions properly.
+
+        Uses the adapter's state_space.index_to_onehot() to produce the correct
+        shape (e.g., (N,) for simple gridworld, (N,2) for key gridworld).
         """
         s_idx = self.adapter.get_current_state_index()
-        state = np.zeros(self.adapter.n_states)
-        state[s_idx] = 1.0
-        return state
+        return self.adapter.state_space.index_to_onehot(s_idx)
 
     def _step_with_smooth(self, action: int, smooth_steps: int) -> int:
         """Take an action with smooth stepping for continuous environments.
