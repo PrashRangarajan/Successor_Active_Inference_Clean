@@ -6,9 +6,7 @@ Acrobot is a 2-link planar robot that must swing the end-effector above a thresh
 The continuous 4D state (theta1, theta2, dtheta1, dtheta2) is discretized into bins.
 """
 
-import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import numpy as np
 import gymnasium as gym
@@ -18,19 +16,19 @@ import imageio
 # Import the unified framework
 from core import HierarchicalSRAgent
 from environments.acrobot import AcrobotAdapter
-
+from examples.configs import ACROBOT
 
 def run_acrobot_example():
     """Run the hierarchical SR agent on Acrobot."""
 
-    # Configuration
-    n_theta_bins = 7    # Number of bins for angles (theta1, theta2)
-    n_dtheta_bins = 6  # Number of bins for angular velocities (dtheta1, dtheta2)
-    n_clusters = 4       # Number of macro states
-    gamma = 0.95
-    learning_rate = 0.05
-    train_episodes = 10000   # Episodes for learning dynamics
-    test_max_steps = 1000   # Max steps per test episode
+    # Configuration (from centralized config)
+    n_theta_bins = ACROBOT["n_theta_bins"]
+    n_dtheta_bins = ACROBOT["n_dtheta_bins"]
+    n_clusters = ACROBOT["n_clusters"]
+    gamma = ACROBOT["gamma"]
+    learning_rate = ACROBOT["learning_rate"]
+    train_episodes = ACROBOT["train_episodes"]
+    test_max_steps = ACROBOT["test_max_steps"]
 
     # Initial state: [theta1, theta2, dtheta1, dtheta2]
     # Start hanging down with zero velocity
@@ -156,7 +154,6 @@ def run_acrobot_example():
     print("DONE")
     print("="*50)
 
-
 def plot_value_function_2d(agent, save_path: str):
     """Plot 2D projection of value function over (theta1, theta2), averaged over velocities."""
     if agent.M is None or agent.C is None:
@@ -184,7 +181,6 @@ def plot_value_function_2d(agent, save_path: str):
     plt.close()
     print(f"  Saved value function plot to {save_path}")
 
-
 def plot_macro_distribution(agent, save_path: str):
     """Plot distribution of states across macro clusters."""
     if not agent.macro_state_list:
@@ -210,7 +206,6 @@ def plot_macro_distribution(agent, save_path: str):
     plt.savefig(save_path)
     plt.close()
     print(f"  Saved macro distribution plot to {save_path}")
-
 
 def run_video_episode(agent, adapter, save_path: str, max_steps: int = 300,
                       smooth_steps: int = 10):
@@ -283,7 +278,6 @@ def run_video_episode(agent, adapter, save_path: str, max_steps: int = 300,
         print(f"  Saved video to {save_path} ({steps} steps, {len(frames)} frames)")
     else:
         print("  No frames to save")
-
 
 if __name__ == '__main__':
     run_acrobot_example()

@@ -15,15 +15,11 @@ Key differences from MDP:
 import numpy as np
 import matplotlib.pyplot as plt
 import os
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from unified_env import StandardGridworld as SR_Gridworld
 from environments.pomdp_gridworld import POMDPGridworldAdapter
 from environments.gridworld import get_layout, AVAILABLE_LAYOUTS
 from core.hierarchical_agent import HierarchicalSRAgent
-
 
 def visualize_pomdp_episode_comparison(adapter, agent, grid_size):
     """Compare hierarchical vs flat trajectories on the POMDP environment.
@@ -88,7 +84,6 @@ def visualize_pomdp_episode_comparison(adapter, agent, grid_size):
     plt.savefig("figures/pomdp_gridworld/episode_trajectory_comparison.png", bbox_inches='tight')
     plt.close()
     print("Episode trajectory comparison saved to figures/pomdp_gridworld/episode_trajectory_comparison.png")
-
 
 def run_pomdp_gridworld_example(layout_name="fourrooms"):
     """Run hierarchical active inference on a POMDP gridworld."""
@@ -300,7 +295,6 @@ def run_pomdp_gridworld_example(layout_name="fourrooms"):
     # print(f"Note: Errors occur due to noisy observations - this is expected in a POMDP!")
 
     return agent, adapter
-
 
 if __name__ == "__main__":
     import argparse

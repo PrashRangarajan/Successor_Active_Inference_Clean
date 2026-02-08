@@ -25,10 +25,7 @@ Usage:
     python examples/run_eval_goal_revaluation.py --train --quick
 """
 
-import sys
 import os
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import argparse
 import copy
@@ -45,9 +42,7 @@ from core.q_learning import QLearningAgent
 from environments.gridworld import GridworldAdapter, get_layout, AVAILABLE_LAYOUTS
 from unified_env import StandardGridworld as SR_Gridworld
 
-
 # ==================== Utilities ====================
-
 
 def switch_q_goal(q_agent, adapter, new_goal_loc, goal_val=100.0, reset_q=False):
     """Switch a Q-learning agent to a new goal.
@@ -71,7 +66,6 @@ def switch_q_goal(q_agent, adapter, new_goal_loc, goal_val=100.0, reset_q=False)
 
     # Reset exploration so agent can discover new goal
     q_agent.epsilon = q_agent.epsilon_start
-
 
 def evaluate_agent(agent, init_state, max_steps, n_eval, mode="flat"):
     """Run multiple eval episodes and return mean metrics.
@@ -107,7 +101,6 @@ def evaluate_agent(agent, init_state, max_steps, n_eval, mode="flat"):
         "steps": np.mean(steps),
         "reached": np.mean(reached),
     }
-
 
 def generate_q_video(q_agent, adapter, init_state, goal_loc, max_steps,
                      save_path, init_loc=(0, 0)):
@@ -234,9 +227,7 @@ def generate_q_video(q_agent, adapter, init_state, goal_loc, max_steps,
     # Restore
     state_locs = orig_state_locs
 
-
 # ==================== Agent Factories ====================
-
 
 def create_sr_agent(grid_size, n_clusters, walls, goal_loc, num_episodes, gamma=0.99):
     """Create a fresh SR agent trained on a specific goal."""
@@ -255,7 +246,6 @@ def create_sr_agent(grid_size, n_clusters, walls, goal_loc, num_episodes, gamma=
     agent.learn_environment(num_episodes)
 
     return agent, adapter
-
 
 def create_q_agent(grid_size, walls, goal_loc, gamma=0.99):
     """Create a fresh Q-learning agent (not yet trained)."""
@@ -279,9 +269,7 @@ def create_q_agent(grid_size, walls, goal_loc, gamma=0.99):
 
     return q_agent, adapter
 
-
 # ==================== Experiment ====================
-
 
 def run_goal_revaluation_experiment(args):
     """Main experiment: train on Goal A, switch to Goal B, compare adaptation.
@@ -453,9 +441,7 @@ def run_goal_revaluation_experiment(args):
         "p2_reached_q_scratch": p2_reached_q_scratch,
     }
 
-
 # ==================== Plotting ====================
-
 
 def plot_retraining_curve(args, data_dir, save_dir, metric="reward"):
     """Plot SR (flat lines) vs Q-learning (rising curves) after goal switch.
@@ -524,7 +510,6 @@ def plot_retraining_curve(args, data_dir, save_dir, metric="reward"):
     plt.close()
     print(f"  Saved {save_dir}/{fname}")
 
-
 def plot_phase1_baseline(args, data_dir, save_dir):
     """Bar chart showing all agents perform well on Goal A (baseline)."""
     os.makedirs(save_dir, exist_ok=True)
@@ -556,9 +541,7 @@ def plot_phase1_baseline(args, data_dir, save_dir):
     plt.close()
     print(f"  Saved {save_dir}/{fname}")
 
-
 # ==================== Main ====================
-
 
 if __name__ == "__main__":
     grid_size = 9

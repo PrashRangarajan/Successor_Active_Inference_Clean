@@ -13,9 +13,7 @@ We reframe the task:
 The continuous 4D state (pos, vel, angle, ang_vel) is discretized into bins.
 """
 
-import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import numpy as np
 import gymnasium as gym
@@ -24,21 +22,21 @@ import imageio
 
 from core import HierarchicalSRAgent
 from environments.cartpole import CartPoleAdapter
-
+from examples.configs import CARTPOLE
 
 def run_cartpole_example():
     """Run the hierarchical SR agent on CartPole."""
 
-    # Configuration
-    n_pos_bins = 6
-    n_vel_bins = 6
-    n_angle_bins = 8
-    n_ang_vel_bins = 6
-    n_clusters = 6
-    gamma = 0.99
-    learning_rate = 0.05
-    train_episodes = 6000
-    test_max_steps = 500
+    # Configuration (from centralized config)
+    n_pos_bins = CARTPOLE["n_pos_bins"]
+    n_vel_bins = CARTPOLE["n_vel_bins"]
+    n_angle_bins = CARTPOLE["n_angle_bins"]
+    n_ang_vel_bins = CARTPOLE["n_ang_vel_bins"]
+    n_clusters = CARTPOLE["n_clusters"]
+    gamma = CARTPOLE["gamma"]
+    learning_rate = CARTPOLE["learning_rate"]
+    train_episodes = CARTPOLE["train_episodes"]
+    test_max_steps = CARTPOLE["test_max_steps"]
 
     # Initial state: centered, balanced, zero velocities
     init_state = [0.0, 0.0, 0.0, 0.0]
@@ -168,7 +166,6 @@ def run_cartpole_example():
     print("DONE")
     print("=" * 50)
 
-
 def run_evaluation_episode(agent, adapter, init_state, max_steps):
     """Run an episode using the agent's policy.
 
@@ -200,7 +197,6 @@ def run_evaluation_episode(agent, adapter, init_state, max_steps):
         steps += 1
 
     return steps
-
 
 def run_episode_with_video(agent, adapter, init_state, max_steps):
     """Run an episode and capture frames for video.
@@ -242,7 +238,6 @@ def run_episode_with_video(agent, adapter, init_state, max_steps):
 
     return frames
 
-
 def plot_value_function_2d(agent, adapter, save_path):
     """Plot 2D projection of value function over (pos, angle), averaged over velocities."""
     if agent.M is None or agent.C is None:
@@ -282,7 +277,6 @@ def plot_value_function_2d(agent, adapter, save_path):
     plt.close()
     print(f"  Saved value function plot to {save_path}")
 
-
 def plot_macro_distribution(agent, save_path):
     """Plot distribution of states across macro clusters."""
     if not agent.macro_state_list:
@@ -307,7 +301,6 @@ def plot_macro_distribution(agent, save_path):
     plt.savefig(save_path)
     plt.close()
     print(f"  Saved macro distribution plot to {save_path}")
-
 
 if __name__ == '__main__':
     run_cartpole_example()

@@ -20,10 +20,7 @@ Usage:
     python examples/run_eval.py --train --quick
 """
 
-import sys
 import os
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import warnings
 
@@ -39,14 +36,13 @@ import numpy as np
 from core import HierarchicalSRAgent
 from core.q_learning import QLearningAgent
 from environments.gridworld import GridworldAdapter, get_layout, AVAILABLE_LAYOUTS
+from examples.configs import GRIDWORLD
 from unified_env import StandardGridworld as SR_Gridworld
-
 
 # ==================== Utilities ====================
 
-
-def relative_stability_paper_style(returns, Ke=100, smooth_window=1, eps=1e-8):
-    """Paper-style 'Relative Stability' (lower is better).
+def relative_stability(returns, Ke=100, smooth_window=1, eps=1e-8):
+    """Relative Stability metric (lower is better).
 
     Computes mean absolute relative deviation from the best return within the
     final window.
@@ -76,9 +72,7 @@ def relative_stability_paper_style(returns, Ke=100, smooth_window=1, eps=1e-8):
     denom = np.abs(best) + eps
     return float(np.mean(np.abs((w_smooth - best) / denom)))
 
-
 # ==================== Agent Factories ====================
-
 
 def create_sr_agent(grid_size, walls, n_clusters, goal_loc, goal_val,
                     num_episodes, gamma=0.99, learning_rate=0.05,
@@ -108,7 +102,6 @@ def create_sr_agent(grid_size, walls, n_clusters, goal_loc, goal_val,
     agent.learn_environment(num_episodes)
     return agent, adapter
 
-
 def create_q_agent(grid_size, walls, goal_loc, goal_val, gamma=0.99):
     """Create a fresh Q-learning agent (not yet trained).
 
@@ -132,7 +125,6 @@ def create_q_agent(grid_size, walls, goal_loc, goal_val, gamma=0.99):
         gamma=gamma,
     )
     return q_agent, adapter
-
 
 def compute_true_references(grid_size, walls, n_clusters, goal_loc, goal_val,
                             gamma=0.99):
@@ -162,9 +154,7 @@ def compute_true_references(grid_size, walls, n_clusters, goal_loc, goal_val,
 
     return true_M, true_V, true_M_macro
 
-
 # ==================== Experiments ====================
-
 
 def SR_rewards_values(args):
     """Main experiment: rewards + SR convergence across training checkpoints.
@@ -284,7 +274,6 @@ def SR_rewards_values(args):
     return (SR_vals, SR_vals2, SR_succ, SR_succ2, SR_succ_macro,
             SR_rewards, SR_rewards2, Q_rewards)
 
-
 def SR_distances(args, GOALS):
     """Goal-distance experiment: planning steps vs distance to goal.
 
@@ -331,16 +320,13 @@ def SR_distances(args, GOALS):
 
     return np.array(SR_dists), np.array(SR_dists2)
 
-
 # ==================== Main ====================
 
-
 if __name__ == "__main__":
-    grid_size = 9
+    grid_size = GRIDWORLD["grid_size"]
     init_loc = (0, 0)
-    nruns = 20
-    eps = [50, 100, 200, 300, 400, 500, 750, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000]
-    # eps = [50, 100, 250, 500, 1000, 2000, 4000, 8000]
+    nruns = GRIDWORLD["eval_n_runs"]
+    eps = list(GRIDWORLD["eval_episodes"])
     GOALS = [(0, 3), (0, 6), (2, 4), (3, 0), (4, 4), (5, 8), (6, 3), (7, 0), (8, 4), (8, 8)]
     goal_val = 100
 
@@ -362,8 +348,8 @@ if __name__ == "__main__":
 
     # Build args namespace (matches legacy format for plotting compatibility)
     if args_cli.quick:
-        eps = [500, 1000]
-        nruns = 2
+        eps = list(GRIDWORLD["eval_quick_episodes"])
+        nruns = GRIDWORLD["eval_quick_n_runs"]
 
     args = argparse.Namespace(
         grid_size=grid_size,
@@ -399,15 +385,15 @@ if __name__ == "__main__":
 
         # Compute relative stability for all three agent types
         SR_rel_stability_hierarchy = np.array([
-            relative_stability_paper_style(SR_rewards[i, :])
+            relative_stability(SR_rewards[i, :])
             for i in range(SR_rewards.shape[0])
         ])
         SR_rel_stability_flat = np.array([
-            relative_stability_paper_style(SR_rewards2[i, :])
+            relative_stability(SR_rewards2[i, :])
             for i in range(SR_rewards2.shape[0])
         ])
         Q_rel_stability = np.array([
-            relative_stability_paper_style(Q_rewards[i, :])
+            relative_stability(Q_rewards[i, :])
             for i in range(Q_rewards.shape[0])
         ])
 

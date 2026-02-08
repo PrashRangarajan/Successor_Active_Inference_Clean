@@ -12,26 +12,15 @@ from typing import Any, List, Optional, Tuple
 
 import numpy as np
 
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-
-from core.base_environment import BaseEnvironmentAdapter
+from environments.binned_continuous_adapter import BinnedContinuousAdapter, clamp
 from core.state_space import BinnedContinuousStateSpace
-
-
-def clamp(x: int, minimum: int, maximum: int) -> int:
-    """Clamp integer to range."""
-    return max(minimum, min(maximum, x))
-
 
 def angle_from_obs(obs: np.ndarray) -> float:
     """Extract angle from Pendulum observation [cos(θ), sin(θ), ω]."""
     cos_t, sin_t = obs[0], obs[1]
     return math.atan2(sin_t, cos_t)
 
-
-class PendulumAdapter(BaseEnvironmentAdapter):
+class PendulumAdapter(BinnedContinuousAdapter):
     """Adapter for Pendulum continuous control environment.
 
     State representation: (theta_bin, omega_bin) discretized angle and
@@ -98,29 +87,12 @@ class PendulumAdapter(BaseEnvironmentAdapter):
         j = clamp(np.digitize(omega, self.omega_space), 1, self.n_omega_bins) - 1
         return (i, j)
 
-    # ==================== Properties ====================
+    def _process_action(self, action: int):
+        """Convert discrete action index to continuous torque array.
 
-    @property
-    def state_space(self) -> BinnedContinuousStateSpace:
-        return self._state_space
-
-    @property
-    def n_actions(self) -> int:
-        return self._n_actions
-
-    @property
-    def env(self) -> Any:
-        return self._env
-
-    @property
-    def transition_matrix_shape(self) -> Tuple[int, ...]:
-        N = self.n_states
-        return (N, N, self._n_actions)
-
-    @property
-    def successor_matrix_shape(self) -> Tuple[int, ...]:
-        N = self.n_states
-        return (N, N)
+        Pendulum-v1 expects a numpy array [torque] as the action.
+        """
+        return np.array([self._discrete_torques[action]])
 
     # ==================== Environment Interaction ====================
 
@@ -146,44 +118,6 @@ class PendulumAdapter(BaseEnvironmentAdapter):
         state_idx = self.state_space.state_to_index(discrete_state)
         self._current_state = self.state_space.index_to_onehot(state_idx)
         return self._current_state
-
-    def step(self, action: int) -> np.ndarray:
-        """Take discrete action and return new discretized state.
-
-        Maps the discrete action index to a continuous torque value
-        before passing it to the Gym environment.
-        """
-        torque = np.array([self._discrete_torques[action]])
-        obs, reward, terminated, truncated, info = self._env.step(torque)
-
-        self._current_obs = obs
-        discrete_state = self.discretize_obs(obs)
-        state_idx = self.state_space.state_to_index(discrete_state)
-        self._current_state = self.state_space.index_to_onehot(state_idx)
-        return self._current_state
-
-    def step_with_info(self, action: int) -> Tuple[np.ndarray, float, bool, bool, dict]:
-        """Take discrete action and return full step information."""
-        torque = np.array([self._discrete_torques[action]])
-        obs, reward, terminated, truncated, info = self._env.step(torque)
-
-        self._current_obs = obs
-        discrete_state = self.discretize_obs(obs)
-        state_idx = self.state_space.state_to_index(discrete_state)
-        self._current_state = self.state_space.index_to_onehot(state_idx)
-        return self._current_state, reward, terminated, truncated, info
-
-    def get_current_state(self) -> Tuple[int, int]:
-        """Get current discrete state (theta_bin, omega_bin)."""
-        return self.discretize_obs(self._current_obs)
-
-    def get_current_state_index(self) -> int:
-        """Get current state as flat index."""
-        return self.state_space.state_to_index(self.get_current_state())
-
-    def get_current_obs(self) -> np.ndarray:
-        """Get current continuous observation [cos(θ), sin(θ), ω]."""
-        return self._current_obs
 
     def sample_random_state(self) -> np.ndarray:
         """Reset to a uniformly random state across the full state space.
@@ -214,73 +148,7 @@ class PendulumAdapter(BaseEnvironmentAdapter):
         self._current_state = self.state_space.index_to_onehot(state_idx)
         return self._current_state
 
-    # ==================== Matrix Operations ====================
-
-    def multiply_B_s(self, B: np.ndarray, state: np.ndarray,
-                     action: Optional[int]) -> np.ndarray:
-        """Multiply transition matrix with state vector.
-
-        B shape: (N, N, n_actions)
-        state shape: (N,)
-        """
-        if action is not None:
-            return B[:, :, action] @ state
-        else:
-            result = np.zeros_like(state)
-            for a in range(self._n_actions):
-                result += B[:, :, a] @ state
-            return result / self._n_actions
-
-    def multiply_M_C(self, M: np.ndarray, C: np.ndarray) -> np.ndarray:
-        """Multiply successor matrix with preference vector.
-
-        M shape: (N, N)
-        C shape: (N,)
-        Returns: (N,)
-        """
-        return M @ C
-
-    # ==================== Transition Matrix ====================
-
-    def get_transition_matrix(self) -> np.ndarray:
-        """Pendulum doesn't have a known analytical transition matrix.
-
-        Returns empty matrix — must be learned from experience.
-        """
-        return self.create_empty_transition_matrix()
-
-    def normalize_transition_matrix(self, B: np.ndarray,
-                                    goal_states: List[int] = None) -> np.ndarray:
-        """Normalize transition matrix to valid probability distribution."""
-        N = self.n_states
-
-        # Handle zero columns (unvisited states → self-loop)
-        for col in range(N):
-            for action in range(self._n_actions):
-                col_sum = np.sum(B[:, col, action])
-                if col_sum == 0:
-                    B[col, col, action] = 1
-
-        # Normalize
-        B = B / B.sum(axis=0, keepdims=True)
-
-        # Make goal states absorbing
-        if goal_states:
-            for gs in goal_states:
-                B[:, gs, :] = 0
-                B[gs, gs, :] = 1
-
-        return B
-
     # ==================== Goal / Reward ====================
-
-    def create_goal_prior(self, goal_states: List[int], reward: float = 10.0,
-                          default_cost: float = -1.0) -> np.ndarray:
-        """Create goal preference vector."""
-        C = np.ones(self.n_states) * default_cost
-        for gs in goal_states:
-            C[gs] = reward
-        return C
 
     def get_goal_states(self, goal_spec: Any) -> List[int]:
         """Convert goal specification to state indices.
@@ -319,10 +187,6 @@ class PendulumAdapter(BaseEnvironmentAdapter):
             raise ValueError(f"Invalid goal specification: {goal_spec}")
 
     # ==================== Visualization ====================
-
-    def render_state(self, state_index: int) -> Tuple[int, int]:
-        """Get (theta_bin, omega_bin) for visualization."""
-        return self.state_space.index_to_state(state_index)
 
     def get_state_label(self, state_index: int) -> str:
         """Get human-readable state label."""

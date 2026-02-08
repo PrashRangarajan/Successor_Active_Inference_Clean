@@ -12,10 +12,7 @@ Can be run standalone:
 Or imported by run_eval.py / run_eval_acrobot.py / run_eval_mountaincar.py.
 """
 
-import sys
 import os
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import argparse
 import json
@@ -26,9 +23,7 @@ import matplotlib.pyplot as plt
 
 plt.style.use("seaborn-v0_8-poster")
 
-
 # ==================== Helpers ====================
-
 
 def get_distance(grid_size, walls, start, goal):
     """BFS shortest-path distance on gridworld respecting walls.
@@ -67,9 +62,7 @@ def get_distance(grid_size, walls, start, goal):
 
     return -1  # Unreachable
 
-
 # ==================== Plot Functions ====================
-
 
 def plot_SR_rewards(args, data_dir="data/eval/gridworld", save_dir="figures/eval/gridworld"):
     """Plot reward curves with confidence bands (Hierarchy vs Flat vs Q-Learning)."""
@@ -125,7 +118,6 @@ def plot_SR_rewards(args, data_dir="data/eval/gridworld", save_dir="figures/eval
     plt.savefig(os.path.join(save_dir, "reward_obtained.png"), format="png")
     plt.close()
     print(f"  Saved {save_dir}/reward_obtained.png")
-
 
 def plot_SR_values(args, data_dir="data/eval/gridworld", save_dir="figures/eval/gridworld"):
     """Plot SR convergence: goal value distance + successor matrix distance."""
@@ -200,7 +192,6 @@ def plot_SR_values(args, data_dir="data/eval/gridworld", save_dir="figures/eval/
     plt.close()
     print(f"  Saved {save_dir}/successor_values.png")
 
-
 def plot_SR_steps(args, data_dir="data/eval/gridworld", save_dir="figures/eval/gridworld"):
     """Plot number of steps to success."""
     os.makedirs(save_dir, exist_ok=True)
@@ -239,7 +230,6 @@ def plot_SR_steps(args, data_dir="data/eval/gridworld", save_dir="figures/eval/g
     plt.close()
     print(f"  Saved {save_dir}/num_steps.png")
 
-
 def plot_SR_times(args, data_dir="data/eval/gridworld", save_dir="figures/eval/gridworld"):
     """Plot processing time comparison."""
     os.makedirs(save_dir, exist_ok=True)
@@ -276,7 +266,6 @@ def plot_SR_times(args, data_dir="data/eval/gridworld", save_dir="figures/eval/g
     plt.savefig(os.path.join(save_dir, "processing_times.png"), format="png")
     plt.close()
     print(f"  Saved {save_dir}/processing_times.png")
-
 
 def plot_SR_distances(args, GOALS, data_dir="data/eval/gridworld", save_dir="figures/eval/gridworld"):
     """Plot planning steps vs BFS distance from goal."""
@@ -317,7 +306,6 @@ def plot_SR_distances(args, GOALS, data_dir="data/eval/gridworld", save_dir="fig
     plt.savefig(os.path.join(save_dir, "num_dist.png"), format="png")
     plt.close()
     print(f"  Saved {save_dir}/num_dist.png")
-
 
 def plot_relative_stability(args, data_dir="data/eval/gridworld", save_dir="figures/eval/gridworld"):
     """Plot relative stability bar chart (lower is better)."""
@@ -377,9 +365,7 @@ def plot_relative_stability(args, data_dir="data/eval/gridworld", save_dir="figu
     plt.close()
     print(f"  Saved {save_dir}/relative_stability.png")
 
-
 # ==================== Main ====================
-
 
 if __name__ == "__main__":
     data_dir = "data/eval/gridworld"

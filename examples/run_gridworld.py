@@ -4,9 +4,7 @@ This demonstrates how to use the unified agent with the Gridworld environment.
 You can use either the original environment or the new unified environment.
 """
 
-import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import argparse
 import numpy as np
@@ -14,19 +12,15 @@ import numpy as np
 # Import the unified framework
 from core import HierarchicalSRAgent
 from environments.gridworld import GridworldAdapter, get_layout, AVAILABLE_LAYOUTS
+from examples.configs import GRIDWORLD
 
-# Import environment - can use either:
-# Option 1: Original environment
-# from env import SR_Gridworld
-# Option 2: Unified environment (recommended)
 from unified_env import StandardGridworld as SR_Gridworld
-
 
 def run_gridworld_example(layout_name="fourrooms"):
     """Run the hierarchical SR agent on a gridworld environment."""
 
-    # Configuration
-    grid_size = 9
+    # Configuration (from centralized config)
+    grid_size = GRIDWORLD["grid_size"]
     init_loc = (0, 0)
 
     layout = get_layout(layout_name, grid_size)
@@ -48,9 +42,9 @@ def run_gridworld_example(layout_name="fourrooms"):
     agent = HierarchicalSRAgent(
         adapter=adapter,
         n_clusters=n_clusters,
-        gamma=0.99,
-        learning_rate=0.05,
-        learn_from_experience=False,  # Use analytical M since we know B
+        gamma=GRIDWORLD["gamma"],
+        learning_rate=GRIDWORLD["learning_rate"],
+        learn_from_experience=GRIDWORLD["learn_from_experience"],
     )
 
     # Set goal
@@ -130,7 +124,6 @@ def run_gridworld_example(layout_name="fourrooms"):
     # Visualize macro action policies
     agent.visualize_policy(save_dir="figures/gridworld/macro_action_network")
     print("  Saved policy visualizations to figures/gridworld/macro_action_network/")
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(

@@ -20,10 +20,7 @@ Usage:
     python examples/run_eval_smooth_stepping.py --train --quick
 """
 
-import sys
 import os
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import argparse
 import time
@@ -46,9 +43,7 @@ CONFIGS = [
     {"name": "train=10, test=10", "train_smooth": 10, "test_smooth": 10},
 ]
 
-
 # ==================== Agent Factory ====================
-
 
 def create_agent(train_smooth_steps, test_smooth_steps,
                  num_episodes=4000, test_max_steps=500,
@@ -82,9 +77,7 @@ def create_agent(train_smooth_steps, test_smooth_steps,
 
     return agent, adapter_test
 
-
 # ==================== Experiment ====================
-
 
 def run_experiment(args):
     """Run the 4-config comparison experiment."""
@@ -149,9 +142,7 @@ def run_experiment(args):
 
     return results
 
-
 # ==================== Plotting ====================
-
 
 def plot_comparison(results, save_dir):
     """Generate grouped bar charts comparing the 4 configurations."""
@@ -226,7 +217,6 @@ def plot_comparison(results, save_dir):
     plt.close()
     print(f"  Saved: {path}")
 
-
 def print_summary(results):
     """Print a summary table of results."""
     print(f"\n{'='*70}")
@@ -244,9 +234,7 @@ def print_summary(results):
               f"{fs:>9.1f}% {fst:>11.1f}")
     print(f"{'='*70}")
 
-
 # ==================== Main ====================
-
 
 def main():
     parser = argparse.ArgumentParser(
@@ -298,7 +286,6 @@ def main():
 
         print_summary(results)
         plot_comparison(results, fig_dir)
-
 
 if __name__ == '__main__':
     main()

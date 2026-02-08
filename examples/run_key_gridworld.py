@@ -4,34 +4,27 @@ This demonstrates how to use the unified agent with the Key Gridworld environmen
 which has augmented state space (location + has_key).
 """
 
-import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import numpy as np
 
 # Import the unified framework
 from core import HierarchicalSRAgent
 from environments.key_gridworld import KeyGridworldAdapter
+from examples.configs import KEY_GRIDWORLD
 
-# Import environment - can use either:
-# Option 1: Original environment
-# sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), 'key_env'))
-# from env_key import SR_Gridworld
-# Option 2: Unified environment (recommended)
 from unified_env import KeyGridworld as SR_Gridworld
-
 
 def run_key_gridworld_example():
     """Run the hierarchical SR agent on Key Gridworld."""
 
-    # Configuration
-    grid_size = 5
-    n_clusters = 5
-    init_loc = (0, 0)
-    key_loc = (3, 0)
+    # Configuration (from centralized config)
+    grid_size = KEY_GRIDWORLD["grid_size"]
+    n_clusters = KEY_GRIDWORLD["n_clusters"]
+    init_loc = KEY_GRIDWORLD["init_loc"]
+    key_loc = KEY_GRIDWORLD["key_loc"]
     goal_loc = (grid_size - 1, grid_size - 1)
-    has_pickup_action = True  # Separate pickup action
+    has_pickup_action = KEY_GRIDWORLD["has_pickup_action"]
 
     # Define walls
     walls = (
@@ -51,8 +44,8 @@ def run_key_gridworld_example():
     agent = HierarchicalSRAgent(
         adapter=adapter,
         n_clusters=n_clusters,
-        gamma=0.99,
-        learning_rate=0.05,
+        gamma=KEY_GRIDWORLD["gamma"],
+        learning_rate=KEY_GRIDWORLD["learning_rate"],
         learn_from_experience=True,
     )
 
@@ -137,7 +130,6 @@ def run_key_gridworld_example():
     # Visualize macro action policies
     agent.visualize_policy(save_dir="figures/key_gridworld/macro_action_network")
     print("  Saved policy visualizations to figures/key_gridworld/macro_action_network/")
-
 
 if __name__ == '__main__':
     run_key_gridworld_example()

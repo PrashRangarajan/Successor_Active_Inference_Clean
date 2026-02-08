@@ -7,13 +7,8 @@ The agent must pick up a key before reaching the goal.
 from typing import Any, List, Optional, Tuple
 import numpy as np
 
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-
 from core.base_environment import BaseEnvironmentAdapter
 from core.state_space import AugmentedStateSpace
-
 
 class KeyGridworldAdapter(BaseEnvironmentAdapter):
     """Adapter for gridworld with key pickup.

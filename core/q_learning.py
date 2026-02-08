@@ -42,6 +42,16 @@ class QLearningAgent:
             epsilon_end: Minimum exploration rate (default: 0.05)
             epsilon_decay: Decay rate for epsilon per episode (default: 0.995)
         """
+        # --- Input validation ---
+        if not (0 < gamma <= 1):
+            raise ValueError(f"gamma must be in (0, 1], got {gamma}")
+        if not (0 < alpha <= 1):
+            raise ValueError(f"alpha must be in (0, 1], got {alpha}")
+        if not (0 <= epsilon_start <= 1):
+            raise ValueError(f"epsilon_start must be in [0, 1], got {epsilon_start}")
+        if not (0 <= epsilon_end <= 1):
+            raise ValueError(f"epsilon_end must be in [0, 1], got {epsilon_end}")
+
         self.adapter = adapter
         self.goal_states = set(goal_states)
         self.C = C

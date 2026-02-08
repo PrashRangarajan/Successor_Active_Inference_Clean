@@ -19,10 +19,7 @@ Usage:
     python examples/run_eval_cartpole.py --train --quick
 """
 
-import sys
 import os
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import warnings
 
@@ -32,6 +29,7 @@ warnings.filterwarnings("ignore", message=".*step.*terminated.*")
 import argparse
 import json
 import time
+from collections import OrderedDict
 
 import numpy as np
 import gymnasium as gym
@@ -40,34 +38,18 @@ import matplotlib.pyplot as plt
 plt.style.use("seaborn-v0_8-poster")
 
 from core import HierarchicalSRAgent
+from core.eval_utils import (
+    relative_stability,
+    compute_stability_array,
+    plot_reward_curves,
+    plot_stability_bars,
+    save_eval_data,
+    load_eval_args,
+)
 from environments.cartpole import CartPoleAdapter
-
-
-# ==================== Utilities ====================
-
-
-def relative_stability_paper_style(returns, Ke=100, smooth_window=1, eps=1e-8):
-    """Paper-style 'Relative Stability' (lower is better)."""
-    r = np.asarray(returns, dtype=float).reshape(-1)
-    if r.size == 0:
-        return np.nan
-    Ke = int(min(max(1, Ke), r.size))
-    w = r[-Ke:]
-
-    if smooth_window is not None and int(smooth_window) > 1 and w.size >= int(smooth_window):
-        k = int(smooth_window)
-        kernel = np.ones(k, dtype=float) / k
-        w_smooth = np.convolve(w, kernel, mode="same")
-    else:
-        w_smooth = w
-
-    best = np.max(w)
-    denom = np.abs(best) + eps
-    return float(np.mean(np.abs((w_smooth - best) / denom)))
-
+from examples.configs import CARTPOLE, SHARED
 
 # ==================== Agent Factory ====================
-
 
 def create_cartpole_agent(n_pos_bins, n_vel_bins, n_angle_bins, n_ang_vel_bins,
                           n_clusters, num_episodes, gamma=0.99, learning_rate=0.05,
@@ -113,7 +95,6 @@ def create_cartpole_agent(n_pos_bins, n_vel_bins, n_angle_bins, n_ang_vel_bins,
 
     return agent, adapter_test
 
-
 def run_evaluation_episode(agent, adapter, init_state, max_steps):
     """Run an episode using the agent's policy.
 
@@ -146,7 +127,6 @@ def run_evaluation_episode(agent, adapter, init_state, max_steps):
 
     return steps
 
-
 def run_random_episode(adapter, init_state, max_steps):
     """Run an episode with random actions (baseline).
 
@@ -166,9 +146,7 @@ def run_random_episode(adapter, init_state, max_steps):
 
     return steps
 
-
 # ==================== Experiment ====================
-
 
 def cartpole_steps_experiment(args):
     """Main experiment: steps survived across training checkpoints.
@@ -246,88 +224,19 @@ def cartpole_steps_experiment(args):
 
     return SR_steps, random_steps
 
-
-# ==================== Plotting ====================
-
-
-def plot_cartpole_steps(args, save_dir="figures/eval/cartpole"):
-    """Plot steps survived across training checkpoints."""
-    os.makedirs(save_dir, exist_ok=True)
-    eps_range = args.episodes
-
-    sr = np.load("data/eval/cartpole/SR_steps.npy")[:, :len(eps_range)]
-    rand = np.load("data/eval/cartpole/random_steps.npy")
-
-    mean_sr = np.mean(sr, axis=0)
-    std_sr = np.std(sr, axis=0) / np.sqrt(len(sr))
-    mean_rand = float(np.mean(rand))
-    std_rand = float(np.std(rand) / np.sqrt(len(rand)))
-
-    fig = plt.figure(figsize=(14, 10))
-    plt.plot(eps_range, mean_sr, label="SR Agent", marker='o')
-    plt.fill_between(eps_range, mean_sr - std_sr, mean_sr + std_sr, alpha=0.3)
-
-    # Random baseline as horizontal line
-    plt.axhline(y=mean_rand, color='gray', linestyle='--', alpha=0.7,
-                label=f'Random ({mean_rand:.0f}±{std_rand:.0f})')
-    plt.axhspan(mean_rand - std_rand, mean_rand + std_rand,
-                color='gray', alpha=0.1)
-
-    plt.xlabel("Number of Training Episodes", fontsize=28)
-    plt.ylabel("Steps Survived", fontsize=28)
-    plt.title("CartPole: Steps Survived (Experimental)", fontsize=28)
-    plt.legend(fontsize=22)
-    plt.xticks(fontsize=26)
-    plt.yticks(fontsize=26)
-    plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, "cartpole_steps.png"), format="png")
-    plt.close()
-    print(f"  Saved {save_dir}/cartpole_steps.png")
-
-
-def plot_cartpole_stability(args, save_dir="figures/eval/cartpole"):
-    """Plot relative stability bar chart (SR vs Random)."""
-    os.makedirs(save_dir, exist_ok=True)
-
-    sr_path = "data/eval/cartpole/SR_relative_stability.npy"
-
-    if not os.path.exists(sr_path):
-        print("  No stability data found — skipping")
-        return
-
-    sr_st = np.load(sr_path)
-
-    labels = ["SR Agent"]
-    means = [float(np.mean(sr_st))]
-    sems = [float(np.std(sr_st) / np.sqrt(len(sr_st)))]
-
-    fig = plt.figure(figsize=(8, 8))
-    x = np.arange(len(labels))
-    plt.bar(x, means, yerr=sems, capsize=8, color='C0')
-    plt.xticks(x, labels, fontsize=26)
-    plt.yticks(fontsize=26)
-    plt.ylabel("Relative Stability", fontsize=20)
-    plt.title("CartPole: Relative Stability", fontsize=24)
-    plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, "cartpole_relative_stability.png"), format="png")
-    plt.close()
-    print(f"  Saved {save_dir}/cartpole_relative_stability.png")
-
-
 # ==================== Main ====================
 
-
 if __name__ == "__main__":
-    # CartPole configuration
-    n_pos_bins = 6
-    n_vel_bins = 6
-    n_angle_bins = 8
-    n_ang_vel_bins = 6
-    n_clusters = 6
-    gamma = 0.99
-    nruns = 5
-    eps = [1000, 2000, 4000, 6000, 8000, 10000]
-    test_max_steps = 500
+    # CartPole configuration (from centralized config)
+    n_pos_bins = CARTPOLE["n_pos_bins"]
+    n_vel_bins = CARTPOLE["n_vel_bins"]
+    n_angle_bins = CARTPOLE["n_angle_bins"]
+    n_ang_vel_bins = CARTPOLE["n_ang_vel_bins"]
+    n_clusters = CARTPOLE["n_clusters"]
+    gamma = CARTPOLE["gamma"]
+    nruns = CARTPOLE["eval_n_runs"]
+    eps = list(CARTPOLE["eval_episodes"])
+    test_max_steps = CARTPOLE["test_max_steps"]
 
     parser = argparse.ArgumentParser(description="CartPole Eval (Experimental)")
     parser.add_argument("--train", action="store_true", help="Run experiments")
@@ -336,8 +245,8 @@ if __name__ == "__main__":
     args_cli = parser.parse_args()
 
     if args_cli.quick:
-        eps = [1000, 4000, 8000]
-        nruns = 2
+        eps = list(CARTPOLE["eval_quick_episodes"])
+        nruns = CARTPOLE["eval_quick_n_runs"]
 
     args = argparse.Namespace(
         n_pos_bins=n_pos_bins,
@@ -349,15 +258,18 @@ if __name__ == "__main__":
         n_runs=args_cli.n_runs if not args_cli.quick else nruns,
         episodes=eps,
         test_max_steps=test_max_steps,
-        use_replay=True,
-        n_replay_epochs=10,
+        use_replay=SHARED["use_replay"],
+        n_replay_epochs=SHARED["n_replay_epochs"],
     )
 
+    data_dir = "data/eval/cartpole"
+    save_dir = "figures/eval/cartpole"
+
     if args_cli.train:
-        os.makedirs("data/eval/cartpole/", exist_ok=True)
+        os.makedirs(data_dir, exist_ok=True)
 
         # Save args
-        with open("data/eval/cartpole/args.json", "w") as f:
+        with open(os.path.join(data_dir, "args.json"), "w") as f:
             json.dump(vars(args), f, indent=2)
 
         n_states = n_pos_bins * n_vel_bins * n_angle_bins * n_ang_vel_bins
@@ -375,25 +287,19 @@ if __name__ == "__main__":
         print(f"\nExperiment completed in {elapsed:.0f}s")
 
         # Compute relative stability
-        SR_rel_stability = np.array([
-            relative_stability_paper_style(SR_steps[i, :])
-            for i in range(SR_steps.shape[0])
-        ])
+        SR_rel_stability = compute_stability_array(SR_steps)
 
         # Save data
-        np.save("data/eval/cartpole/SR_steps.npy", SR_steps)
-        np.save("data/eval/cartpole/random_steps.npy", random_steps)
-        np.save("data/eval/cartpole/SR_relative_stability.npy", SR_rel_stability)
-        print("\nSaved all data to data/eval/cartpole/")
+        save_eval_data(data_dir, {
+            "SR_steps": SR_steps,
+            "random_steps": random_steps,
+            "SR_relative_stability": SR_rel_stability,
+        })
 
     else:
         # Load saved args
-        if os.path.exists("data/eval/cartpole/args.json"):
-            with open("data/eval/cartpole/args.json", "r") as f:
-                saved = json.load(f)
-                args = argparse.Namespace(**saved)
-            print(f"Loaded args: {args}")
-        else:
+        args = load_eval_args(data_dir)
+        if args is None:
             print("No saved args found. Run with --train first.")
 
     # Generate plots
@@ -401,11 +307,18 @@ if __name__ == "__main__":
     print("GENERATING PLOTS")
     print("=" * 60)
 
-    os.makedirs("figures/eval/cartpole", exist_ok=True)
+    os.makedirs(save_dir, exist_ok=True)
 
-    if os.path.exists("data/eval/cartpole/SR_steps.npy"):
-        plot_cartpole_steps(args)
+    if os.path.exists(os.path.join(data_dir, "SR_steps.npy")):
+        data = OrderedDict()
+        data["SR Agent"] = np.load(os.path.join(data_dir, "SR_steps.npy"))
+        plot_reward_curves(args.episodes, data, os.path.join(save_dir, "cartpole_steps.png"),
+                           ylabel="Steps Survived")
 
-    plot_cartpole_stability(args)
+    stability_data = OrderedDict()
+    sr_stab_path = os.path.join(data_dir, "SR_relative_stability.npy")
+    if os.path.exists(sr_stab_path):
+        stability_data["SR Agent"] = np.load(sr_stab_path)
+    plot_stability_bars(stability_data, os.path.join(save_dir, "cartpole_relative_stability.png"))
 
-    print("\nDone! Figures saved to figures/eval/cartpole/")
+    print(f"\nDone! Figures saved to {save_dir}/")

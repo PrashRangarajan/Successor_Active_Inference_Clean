@@ -10,18 +10,12 @@ from typing import Any, List, Optional, Tuple
 import numpy as np
 from scipy import stats
 
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-
 from core.base_environment import BaseEnvironmentAdapter
 from core.state_space import GridStateSpace
-
 
 def log_stable(x):
     """Numerically stable log."""
     return np.log(x + 1e-10)
-
 
 def softmax(dist):
     """Compute softmax of a distribution."""
@@ -30,17 +24,14 @@ def softmax(dist):
     output = output / np.sum(output, axis=0)
     return output
 
-
 def entropy(A):
     """Compute entropy of observation model columns."""
     H_A = - (A * log_stable(A)).sum(axis=0)
     return H_A
 
-
 def kl_divergence(q1, q2):
     """Compute KL divergence between two distributions."""
     return (log_stable(q1) - log_stable(q2)) @ q1
-
 
 def infer_states(observation_index: int, A: np.ndarray, prior: np.ndarray) -> np.ndarray:
     """Bayesian belief update given observation.
@@ -57,7 +48,6 @@ def infer_states(observation_index: int, A: np.ndarray, prior: np.ndarray) -> np
     log_prior = log_stable(prior)
     posterior = softmax(log_likelihood + log_prior)
     return posterior
-
 
 class POMDPGridworldAdapter(BaseEnvironmentAdapter):
     """Adapter for POMDP gridworld with noisy observations.

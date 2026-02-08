@@ -65,6 +65,18 @@ class HierarchicalSRAgent(VisualizationMixin):
             test_smooth_steps: Number of physics steps per action during
                 test-time episode execution.  Defaults to 1 (single step).
         """
+        # --- Input validation ---
+        if n_clusters < 2:
+            raise ValueError(f"n_clusters must be >= 2, got {n_clusters}")
+        if not (0 < gamma <= 1):
+            raise ValueError(f"gamma must be in (0, 1], got {gamma}")
+        if not (0 < learning_rate <= 1):
+            raise ValueError(f"learning_rate must be in (0, 1], got {learning_rate}")
+        if use_replay and n_replay_epochs < 1:
+            raise ValueError(f"n_replay_epochs must be >= 1 when use_replay is True, got {n_replay_epochs}")
+        if test_smooth_steps < 1:
+            raise ValueError(f"test_smooth_steps must be >= 1, got {test_smooth_steps}")
+
         self.adapter = adapter
         self.n_clusters = n_clusters
         self.gamma = gamma

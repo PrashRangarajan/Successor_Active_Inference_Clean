@@ -4,9 +4,7 @@ This demonstrates how to use the unified agent with the Mountain Car environment
 Generates cluster heatmap, macro-state trajectory, stage diagram, and video.
 """
 
-import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import numpy as np
 import imageio
@@ -14,19 +12,18 @@ import imageio
 # Import the unified framework
 from core import HierarchicalSRAgent
 from environments.mountain_car import MountainCarAdapter
+from examples.configs import MOUNTAINCAR
 
 # Import gymnasium
 import gymnasium as gym
 
-
 def run_mountain_car_example():
     """Run the hierarchical SR agent on Mountain Car."""
 
-    # Configuration
-    # Note: Mountain Car requires finer discretization and more training than gridworld
-    n_pos_bins = 10
-    n_vel_bins = 10
-    n_clusters = 6
+    # Configuration (from centralized config)
+    n_pos_bins = MOUNTAINCAR["n_pos_bins"]
+    n_vel_bins = MOUNTAINCAR["n_vel_bins"]
+    n_clusters = MOUNTAINCAR["n_clusters"]
     init_state = [-0.5, 0.0]  # Start in middle with zero velocity
 
     # Create gymnasium environment with rgb_array rendering for video
@@ -46,11 +43,11 @@ def run_mountain_car_example():
     agent = HierarchicalSRAgent(
         adapter=adapter,
         n_clusters=n_clusters,
-        gamma=0.95,  # Lower gamma works better for Mountain Car
-        learning_rate=0.05,
-        learn_from_experience=True,  # Must learn for Mountain Car
-        train_smooth_steps=10,
-        test_smooth_steps=1,
+        gamma=MOUNTAINCAR["gamma"],
+        learning_rate=MOUNTAINCAR["learning_rate"],
+        learn_from_experience=True,
+        train_smooth_steps=MOUNTAINCAR["train_smooth_steps"],
+        test_smooth_steps=MOUNTAINCAR["test_smooth_steps"],
     )
 
     # Set goal (rightmost position)
@@ -159,7 +156,6 @@ def run_mountain_car_example():
     print("DONE")
     print("="*50)
 
-
 def run_episode_with_tracking(agent, adapter, init_state, max_steps=500):
     """Run an episode capturing frames, positions, and velocities.
 
@@ -212,7 +208,6 @@ def run_episode_with_tracking(agent, adapter, init_state, max_steps=500):
         frames.append(frame)
 
     return frames, positions, velocities, actions_taken
-
 
 if __name__ == '__main__':
     run_mountain_car_example()

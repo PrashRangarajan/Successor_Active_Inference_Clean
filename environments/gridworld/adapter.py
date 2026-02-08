@@ -3,13 +3,8 @@
 from typing import Any, List, Optional, Tuple
 import numpy as np
 
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-
 from core.base_environment import BaseEnvironmentAdapter
 from core.state_space import GridStateSpace
-
 
 class GridworldAdapter(BaseEnvironmentAdapter):
     """Adapter for standard gridworld MDP environment.

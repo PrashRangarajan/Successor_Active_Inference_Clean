@@ -7,9 +7,7 @@ framework: the successor matrix M captures the dynamics, and the goal
 prior C encodes the upright target.
 """
 
-import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -17,9 +15,9 @@ import imageio
 
 from core import HierarchicalSRAgent
 from environments.pendulum import PendulumAdapter
+from examples.configs import PENDULUM
 
 import gymnasium as gym
-
 
 def plot_value_function_2d(agent, adapter, save_path="figures/pendulum/value_function_2d.png"):
     """Plot value function as a 2D heatmap over (θ, ω)."""
@@ -54,7 +52,6 @@ def plot_value_function_2d(agent, adapter, save_path="figures/pendulum/value_fun
     plt.savefig(save_path, bbox_inches='tight')
     plt.close()
     print(f"  Value function heatmap saved to {save_path}")
-
 
 def run_episode_with_video(agent, adapter, init_state, max_steps=200):
     """Run an episode using the agent's policy and capture frames for video.
@@ -105,15 +102,14 @@ def run_episode_with_video(agent, adapter, init_state, max_steps=200):
 
     return frames
 
-
 def run_pendulum_example():
     """Run the hierarchical SR agent on Pendulum."""
 
-    # Configuration
-    n_theta_bins = 20
-    n_omega_bins = 20
-    n_torque_bins = 5
-    n_clusters = 4
+    # Configuration (from centralized config)
+    n_theta_bins = PENDULUM["n_theta_bins"]
+    n_omega_bins = PENDULUM["n_omega_bins"]
+    n_torque_bins = PENDULUM["n_torque_bins"]
+    n_clusters = PENDULUM["n_clusters"]
     init_state = [np.pi, 0.0]  # Hanging down, zero velocity
 
     # Create gymnasium environment
@@ -137,8 +133,8 @@ def run_pendulum_example():
     agent = HierarchicalSRAgent(
         adapter=adapter,
         n_clusters=n_clusters,
-        gamma=0.95,
-        learning_rate=0.05,
+        gamma=PENDULUM["gamma"],
+        learning_rate=PENDULUM["learning_rate"],
         learn_from_experience=True,
     )
 
@@ -214,7 +210,6 @@ def run_pendulum_example():
         print("No frames captured")
 
     env.close()
-
 
 if __name__ == '__main__':
     run_pendulum_example()
