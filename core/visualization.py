@@ -890,17 +890,18 @@ class VisualizationMixin:
         if goal_loc is None:
             goal_loc = (grid_size - 1, grid_size - 1)
 
-        # Get wall locations as (x, y) grid coordinates
+        # Get wall locations using render_state for correct (x, y) coordinates
         walls = self.adapter.get_wall_indices() if hasattr(self.adapter, 'get_wall_indices') else []
-        wall_locs = [self.adapter.state_space.index_to_state(w) for w in walls] if walls else []
+        wall_locs = set()
+        for w in walls:
+            loc = self.adapter.render_state(w)
+            wall_locs.add((loc[0], loc[1]))  # take only (x, y), ignore augmented dims
 
         # Create grid
         grid = np.zeros((grid_size, grid_size))
         grid[init_loc] = 1
-        if wall_locs:
-            for w in wall_locs:
-                if len(w) == 2:
-                    grid[w] = 2
+        for w in wall_locs:
+            grid[w] = 2
         grid[goal_loc] = 0.5
 
         # Build arrows grid
