@@ -40,12 +40,17 @@ def run_mountain_car_example():
     adapter = MountainCarAdapter(env, n_pos_bins=n_pos_bins, n_vel_bins=n_vel_bins)
 
     # Create unified agent
+    # Smooth stepping: train=10 lets coarse bins see meaningful transitions,
+    # test=1 gives fine-grained control.  This was the best config in the
+    # comparison (see run_eval_smooth_stepping.py).
     agent = HierarchicalSRAgent(
         adapter=adapter,
         n_clusters=n_clusters,
         gamma=0.95,  # Lower gamma works better for Mountain Car
         learning_rate=0.05,
         learn_from_experience=True,  # Must learn for Mountain Car
+        train_smooth_steps=10,
+        test_smooth_steps=1,
     )
 
     # Set goal (rightmost position)
@@ -129,6 +134,12 @@ def run_mountain_car_example():
             save_path="figures/mountaincar/trajectory_macro.png",
         )
 
+        # Trajectory colored by action taken
+        agent.plot_trajectory_with_actions(
+            positions, velocities, actions,
+            save_path="figures/mountaincar/trajectory_actions.png",
+        )
+
         # Stage diagram (snapshots + phase plot)
         if frames:
             agent.plot_stage_state_diagram(
@@ -186,11 +197,11 @@ def run_episode_with_tracking(agent, adapter, init_state, max_steps=500):
         action = agent._select_micro_action(V)
         actions_taken.append(action)
 
-        # Single step (matches run_episode_flat)
-        adapter.step(action)
+        # Smooth stepping (matches run_episode_flat behaviour)
+        n_phys = agent._step_with_smooth(action, agent.test_smooth_steps)
         agent.current_state = agent._get_planning_state()
 
-        steps += 1
+        steps += n_phys
 
     # Record final state
     obs = adapter.get_current_obs()

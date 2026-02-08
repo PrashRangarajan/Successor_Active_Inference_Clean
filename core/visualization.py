@@ -528,6 +528,84 @@ class VisualizationMixin:
         plt.close()
         print(f"  Saved macro-state trajectory to {save_path}")
 
+    def plot_trajectory_with_actions(
+        self,
+        positions: List[float],
+        velocities: List[float],
+        actions: List[int],
+        save_path: str = "figures/trajectory_actions.png",
+    ):
+        """Plot phase-space trajectory colored by action taken at each step.
+
+        Args:
+            positions: List of position values along the trajectory.
+            velocities: List of velocity values along the trajectory.
+            actions: List of action indices (one per decision step).
+            save_path: Output file path.
+        """
+        import matplotlib.colors as mcolors
+
+        # Get axis labels from adapter
+        if hasattr(self.adapter, 'get_dimension_labels'):
+            dim0_label, dim1_label = self.adapter.get_dimension_labels()
+        else:
+            dim0_label, dim1_label = "Dim 0", "Dim 1"
+
+        # Get action labels from adapter (or fall back to numeric)
+        if hasattr(self.adapter, 'get_action_labels'):
+            action_labels = self.adapter.get_action_labels()
+        else:
+            n_act = self.adapter.n_actions
+            action_labels = [str(i) for i in range(n_act)]
+
+        n_actions = len(action_labels)
+
+        # Trim to matched lengths (actions has one fewer entry than positions)
+        n = min(len(positions), len(velocities), len(actions))
+        pos = np.asarray(positions[:n], dtype=float)
+        vel = np.asarray(velocities[:n], dtype=float)
+        act = np.asarray(actions[:n], dtype=int)
+
+        # Discrete colormap: one distinct colour per action
+        base_cmap = plt.get_cmap("tab10")
+        colors = [base_cmap(i) for i in range(n_actions)]
+        cmap = mcolors.ListedColormap(colors[:n_actions])
+        bounds = np.arange(-0.5, n_actions, 1)
+        norm = mcolors.BoundaryNorm(bounds, cmap.N)
+
+        plt.figure(figsize=(8, 6))
+
+        # Gray connecting line
+        plt.plot(pos, vel, linewidth=0.8, color="gray", alpha=0.4)
+
+        # Scatter colored by action
+        scatter = plt.scatter(pos, vel, c=act, cmap=cmap, norm=norm, s=18,
+                              edgecolors='none')
+
+        # Legend with action labels
+        handles = [
+            plt.Line2D([0], [0], marker='o', color='w',
+                       markerfacecolor=colors[i], markersize=8,
+                       label=action_labels[i])
+            for i in range(n_actions)
+        ]
+        plt.legend(handles=handles, title="Action", loc="best")
+
+        # Start / End markers
+        plt.scatter(pos[0], vel[0], s=80, marker='o', facecolors='none',
+                    edgecolors='black', linewidths=2, label='Start', zorder=5)
+        plt.scatter(pos[-1], vel[-1], s=80, marker='s', facecolors='none',
+                    edgecolors='black', linewidths=2, label='End', zorder=5)
+
+        plt.xlabel(dim0_label, fontsize=12)
+        plt.ylabel(dim1_label, fontsize=12)
+        plt.title("Trajectory with Actions")
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=150)
+        plt.close()
+        print(f"  Saved action trajectory to {save_path}")
+
     def plot_stage_state_diagram(
         self,
         frames: List[np.ndarray],

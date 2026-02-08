@@ -312,3 +312,7 @@ class MountainCarAdapter(BaseEnvironmentAdapter):
     def obs_to_continuous(self, obs: np.ndarray) -> Tuple[float, float]:
         """Extract (position, velocity) from raw observation."""
         return float(obs[0]), float(obs[1])
+
+    def get_action_labels(self) -> List[str]:
+        """Return human-readable labels for each action index."""
+        return ["\u2190 Push Left", "\u00b7 No Push", "\u2192 Push Right"]

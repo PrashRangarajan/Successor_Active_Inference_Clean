@@ -313,7 +313,8 @@ def run_goal_revaluation_experiment(args):
     p2_reached_q_transfer = np.zeros((args.n_runs, n_budgets))
     p2_reached_q_scratch = np.zeros((args.n_runs, n_budgets))
 
-    video_dir = "figures/eval/goal_revaluation"
+    layout = getattr(args, 'layout', 'serpentine')
+    video_dir = f"figures/eval/goal_revaluation/{layout}"
 
     for n in range(args.n_runs):
         print("\n" + "x" * 60)
@@ -556,24 +557,64 @@ def plot_phase1_baseline(args, data_dir, save_dir):
     print(f"  Saved {save_dir}/{fname}")
 
 
+# ==================== Layout Configurations ====================
+
+
+def get_layout_config(layout_name, grid_size):
+    """Return (walls, goal_A, goal_B, n_macro) for a named layout.
+
+    Args:
+        layout_name: 'serpentine', 'fourrooms', or 'fiverooms'
+        grid_size: Side length of the grid
+
+    Returns:
+        Tuple of (walls, goal_A, goal_B, n_macro)
+    """
+    if layout_name == "serpentine":
+        walls = (
+            [(1, x) for x in range(grid_size // 2 + 2)]
+            + [(3, x) for x in range(grid_size // 2 - 2, grid_size)]
+            + [(5, x) for x in range(grid_size // 2 + 2)]
+            + [(7, x) for x in range(grid_size // 2 - 2, grid_size)]
+        )
+        goal_A = (grid_size - 1, grid_size - 1)  # bottom-right
+        goal_B = (0, grid_size - 1)               # top-right
+        n_macro = 4
+    elif layout_name == "fourrooms":
+        walls = (
+            [(4, y) for y in range(grid_size) if y not in [2, 6]]
+            + [(x, 4) for x in range(grid_size) if x not in [2, 6]]
+        )
+        goal_A = (grid_size - 1, grid_size - 1)  # bottom-right room
+        goal_B = (grid_size - 1, 0)               # top-right room
+        n_macro = 4
+    elif layout_name == "fiverooms":
+        # Two large rooms on top separated by a vertical wall at col 4,
+        # a horizontal wall at row 4 spanning most of the width, and
+        # three smaller rooms on the bottom separated by vertical walls
+        # at cols 2 and 6.
+        walls = (
+            [(x, 2) for x in range(grid_size) if x in [4, 5, 7, 8]]
+            + [(x, 6) for x in range(grid_size) if x in [4, 5, 7, 8]]
+            + [(x, 4) for x in range(grid_size) if x in [0, 1, 3]]
+            + [(4, x) for x in range(grid_size) if x not in [0, 8]]
+        )
+        goal_A = (grid_size - 1, grid_size - 1)  # bottom-right room
+        goal_B = (grid_size - 1, 0)               # bottom-left room
+        n_macro = 5
+    else:
+        raise ValueError(f"Unknown layout: {layout_name}. "
+                         f"Choose from: serpentine, fourrooms, fiverooms")
+    return walls, goal_A, goal_B, n_macro
+
+
 # ==================== Main ====================
 
 
 if __name__ == "__main__":
-    # Environment configuration (same serpentine gridworld as run_eval.py)
     grid_size = 9
-    n_macro = 4
     gamma = 0.99
     init_loc = (0, 0)
-    goal_A = (grid_size - 1, grid_size - 1)  # (8, 8) bottom-right
-    goal_B = (0, grid_size - 1)               # (0, 8) top-right
-
-    WALLS = (
-        [(1, x) for x in range(grid_size // 2 + 2)]
-        + [(3, x) for x in range(grid_size // 2 - 2, grid_size)]
-        + [(5, x) for x in range(grid_size // 2 + 2)]
-        + [(7, x) for x in range(grid_size // 2 - 2, grid_size)]
-    )
 
     # Experiment parameters
     initial_train_episodes = 2000
@@ -588,6 +629,9 @@ if __name__ == "__main__":
     parser.add_argument("--train", action="store_true", help="Run experiments")
     parser.add_argument("--quick", action="store_true", help="Quick test")
     parser.add_argument("--n_runs", type=int, default=nruns)
+    parser.add_argument("--layout", type=str, default="serpentine",
+                        choices=["serpentine", "fourrooms", "fiverooms"],
+                        help="Wall layout (default: serpentine)")
     args_cli = parser.parse_args()
 
     if args_cli.quick:
@@ -595,6 +639,9 @@ if __name__ == "__main__":
         nruns = 3
         initial_train_episodes = 1000
         n_eval = 5
+
+    # Get layout-specific configuration
+    WALLS, goal_A, goal_B, n_macro = get_layout_config(args_cli.layout, grid_size)
 
     args = argparse.Namespace(
         grid_size=grid_size,
@@ -604,6 +651,7 @@ if __name__ == "__main__":
         goal_A=goal_A,
         goal_B=goal_B,
         walls=WALLS,
+        layout=args_cli.layout,
         initial_train_episodes=initial_train_episodes,
         retrain_budgets=retrain_budgets,
         n_eval=n_eval,
@@ -611,8 +659,8 @@ if __name__ == "__main__":
         n_runs=args_cli.n_runs if not args_cli.quick else nruns,
     )
 
-    data_dir = "data/eval/goal_revaluation"
-    save_dir = "figures/eval/goal_revaluation"
+    data_dir = f"data/eval/goal_revaluation/{args_cli.layout}"
+    save_dir = f"figures/eval/goal_revaluation/{args_cli.layout}"
 
     if args_cli.train:
         os.makedirs(data_dir, exist_ok=True)
@@ -627,9 +675,10 @@ if __name__ == "__main__":
             json.dump(args_save, f, indent=2)
 
         print("=" * 60)
-        print("GOAL REVALUATION EVAL: SR vs Q-Learning")
+        print(f"GOAL REVALUATION EVAL: SR vs Q-Learning ({args_cli.layout})")
         print("=" * 60)
-        print(f"Grid: {grid_size}x{grid_size}, Macro clusters: {n_macro}")
+        print(f"Layout: {args_cli.layout}, Grid: {grid_size}x{grid_size}, "
+              f"Macro clusters: {n_macro}")
         print(f"Goal A: {args.goal_A}, Goal B: {args.goal_B}")
         print(f"Initial training: {args.initial_train_episodes} eps")
         print(f"Retrain budgets: {args.retrain_budgets}")
