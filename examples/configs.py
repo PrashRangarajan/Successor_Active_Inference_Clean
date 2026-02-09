@@ -185,6 +185,50 @@ POMDP_GRIDWORLD = {
 }
 
 # =====================================================================
+# Neural Acrobot (deep successor features)
+# =====================================================================
+NEURAL_ACROBOT = {
+    # Environment (bins only used for goal checking, not state representation)
+    "n_theta_bins": 6,
+    "n_dtheta_bins": 5,
+    "goal_velocity_filter": True,
+
+    # Neural architecture
+    "sf_dim": 64,
+    "hidden_sizes": (128, 128),
+
+    # Training
+    "gamma": 0.99,
+    "lr": 1e-3,
+    "lr_w": 1e-3,
+    "batch_size": 128,
+    "buffer_size": 100_000,
+    "target_update_freq": 500,
+    "tau": 0.01,
+    "steps_per_episode": 500,
+
+    # Two-phase training: diverse exploration then fixed-start
+    "train_episodes_diverse": 1000,   # Phase 1: build SF representation
+    "train_episodes_fixed": 2000,     # Phase 2: learn task from fixed start
+
+    # Exploration
+    "epsilon_start": 1.0,
+    "epsilon_end": 0.01,
+    "epsilon_decay_steps": 30_000,
+
+    # Test
+    "test_max_steps": 500,
+    "reward": 1.0,
+    "default_cost": 0.0,
+
+    # Eval-specific
+    "eval_n_runs": 5,
+    "eval_episodes": [200, 500, 1000, 2000, 3000, 5000],
+    "eval_quick_episodes": [500, 1000, 2000],
+    "eval_quick_n_runs": 2,
+}
+
+# =====================================================================
 # Shared defaults (replay, Q-learning)
 # =====================================================================
 SHARED = {
