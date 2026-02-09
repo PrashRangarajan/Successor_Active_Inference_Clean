@@ -52,6 +52,21 @@ def make_adapter(render_mode=None, max_episode_steps=500):
     return adapter, base
 
 
+def acrobot_height_reward(obs):
+    """Dense shaped reward based on Acrobot end-effector height.
+
+    Height = -cos(θ1) - cos(θ1 + θ2), ranges from -2 (hanging) to +2 (upright).
+    Goal: height > 1.0. We normalize to [-1, 1] range.
+    """
+    import math
+    c1, s1, c2, s2 = float(obs[0]), float(obs[1]), float(obs[2]), float(obs[3])
+    theta1 = math.atan2(s1, c1)
+    theta2 = math.atan2(s2, c2)
+    height = -np.cos(theta1) - np.cos(theta1 + theta2)
+    # Normalize: height in [-2, 2] → reward in [-1, 1]
+    return height / 2.0
+
+
 def create_agent(adapter, cls=NeuralSRAgent, **extra_kwargs):
     """Create and configure a neural SR agent."""
     cfg = NEURAL_ACROBOT
@@ -76,15 +91,18 @@ def create_agent(adapter, cls=NeuralSRAgent, **extra_kwargs):
         reward=cfg["reward"],
         default_cost=cfg["default_cost"],
         use_env_reward=True,
+        terminal_bonus=cfg.get("terminal_bonus", 0.0),
+        reward_shaping_fn=acrobot_height_reward,
     )
     return agent
 
 
 def train_agent(agent, tag=""):
-    """Two-phase training: diverse + fixed."""
+    """Two-phase training: diverse + mixed."""
     cfg = NEURAL_ACROBOT
     ep_diverse = cfg["train_episodes_diverse"]
     ep_fixed = cfg["train_episodes_fixed"]
+    diverse_frac = cfg.get("diverse_fraction", 0.3)
 
     t0 = time.time()
 
@@ -96,11 +114,13 @@ def train_agent(agent, tag=""):
         log_interval=max(1, ep_diverse // 5),
     )
 
-    print(f"\nPhase 2: Fixed-start training ({ep_fixed} episodes) {tag}")
+    print(f"\nPhase 2: Mixed training ({ep_fixed} episodes, "
+          f"{diverse_frac:.0%} diverse) {tag}")
     agent.learn_environment(
         num_episodes=ep_fixed,
         steps_per_episode=cfg["steps_per_episode"],
-        diverse_start=False,
+        diverse_start=True,
+        diverse_fraction=diverse_frac,
         log_interval=max(1, ep_fixed // 5),
     )
 
@@ -265,8 +285,17 @@ def _run_hierarchical_verbose(agent, adapter, base, V_macro, goal_macros):
                     'final_state': next_obs,
                 }
 
-        if terminated or truncated:
-            print(f"    [Micro] terminated={terminated} truncated={truncated} at step {total_steps}")
+        # Environment terminated (e.g., Acrobot height threshold) = goal success
+        if terminated:
+            print(f"    [Micro] Environment terminated (goal reached) at step {total_steps}")
+            return {
+                'steps': total_steps,
+                'reward': total_reward,
+                'reached_goal': True,
+                'final_state': next_obs,
+            }
+        if truncated:
+            print(f"    [Micro] Truncated at step {total_steps}")
             break
 
         obs = next_obs
@@ -399,7 +428,8 @@ def main():
         adapter_train,
         cls=HierarchicalNeuralSRAgent,
         n_clusters=4,
-        cluster_method='spectral',
+        cluster_method='kmeans',
+        cluster_on='observations',
         n_cluster_samples=5000,
         adjacency_episodes=500,
         adjacency_episode_length=50,

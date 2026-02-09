@@ -22,6 +22,8 @@ import time
 # Ensure imports resolve from the project root (not from examples/)
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+import math
+
 import gymnasium as gym
 import numpy as np
 
@@ -29,6 +31,19 @@ from environments.acrobot import AcrobotAdapter
 from core.neural.continuous_adapter import ContinuousAdapter
 from core.neural.agent import NeuralSRAgent
 from examples.configs import NEURAL_ACROBOT
+
+
+def acrobot_height_reward(obs):
+    """Dense shaped reward based on Acrobot end-effector height.
+
+    Height = -cos(θ1) - cos(θ1 + θ2), ranges from -2 (hanging) to +2 (upright).
+    Goal: height > 1.0. We normalize to [-1, 1] range.
+    """
+    c1, s1, c2, s2 = float(obs[0]), float(obs[1]), float(obs[2]), float(obs[3])
+    theta1 = math.atan2(s1, c1)
+    theta2 = math.atan2(s2, c2)
+    height = -np.cos(theta1) - np.cos(theta1 + theta2)
+    return height / 2.0
 
 
 def main():
@@ -85,6 +100,8 @@ def main():
         reward=cfg["reward"],
         default_cost=cfg["default_cost"],
         use_env_reward=True,
+        terminal_bonus=cfg.get("terminal_bonus", 0.0),
+        reward_shaping_fn=acrobot_height_reward,
     )
 
     # ==================== Two-Phase Training ====================
@@ -106,12 +123,15 @@ def main():
         log_interval=max(1, ep_diverse // 5),
     )
 
-    # Phase 2: Fixed start — learn the task
-    print(f"\nPhase 2: Fixed-start training ({ep_fixed} episodes)")
+    # Phase 2: Mixed training — mostly fixed start with some diverse
+    diverse_frac = cfg.get("diverse_fraction", 0.3)
+    print(f"\nPhase 2: Mixed training ({ep_fixed} episodes, "
+          f"{diverse_frac:.0%} diverse)")
     agent.learn_environment(
         num_episodes=ep_fixed,
         steps_per_episode=cfg["steps_per_episode"],
-        diverse_start=False,
+        diverse_start=True,
+        diverse_fraction=diverse_frac,
         log_interval=max(1, ep_fixed // 5),
     )
 

@@ -202,24 +202,26 @@ NEURAL_ACROBOT = {
     "lr": 1e-3,
     "lr_w": 1e-3,
     "batch_size": 128,
-    "buffer_size": 100_000,
+    "buffer_size": 200_000,
     "target_update_freq": 500,
     "tau": 0.01,
     "steps_per_episode": 500,
 
-    # Two-phase training: diverse exploration then fixed-start
-    "train_episodes_diverse": 1000,   # Phase 1: build SF representation
-    "train_episodes_fixed": 2000,     # Phase 2: learn task from fixed start
+    # Training schedule
+    "train_episodes_diverse": 2000,   # Phase 1: build SF representation (diverse starts)
+    "train_episodes_fixed": 3000,     # Phase 2: mixed training (diverse_fraction of diverse)
+    "diverse_fraction": 0.3,          # Fraction of Phase 2 episodes using diverse starts
 
     # Exploration
     "epsilon_start": 1.0,
-    "epsilon_end": 0.01,
-    "epsilon_decay_steps": 30_000,
+    "epsilon_end": 0.05,
+    "epsilon_decay_steps": 80_000,
 
     # Test
     "test_max_steps": 500,
     "reward": 1.0,
     "default_cost": 0.0,
+    "terminal_bonus": 100.0,  # Bonus when env terminates (goal reached)
 
     # Eval-specific
     "eval_n_runs": 5,

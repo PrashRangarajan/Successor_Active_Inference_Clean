@@ -123,7 +123,9 @@ class NeuralSRAgent:
         self.total_steps = 0
         self._reward_fn = None
         self._goal_reward_fn = None
+        self._reward_shaping_fn = None
         self._use_env_reward = True
+        self._terminal_bonus = 0.0
         self.goal_states = []
 
         # Training logs
@@ -138,7 +140,9 @@ class NeuralSRAgent:
 
     def set_goal(self, goal_spec: Any = None, reward: float = 1.0,
                  default_cost: float = 0.0,
-                 use_env_reward: bool = True):
+                 use_env_reward: bool = True,
+                 terminal_bonus: float = 0.0,
+                 reward_shaping_fn=None):
         """Set the goal for the agent.
 
         Creates a reward function from the goal specification. In the SF
@@ -153,12 +157,22 @@ class NeuralSRAgent:
                 signal for training (denser, better for learning). The
                 goal-based reward is still used for terminal checking
                 during evaluation. If False, use the sparse goal reward.
+            terminal_bonus: Extra reward added when the environment signals
+                termination (goal reached). Helps w learn to distinguish
+                goal states when the base env reward is flat (e.g., Acrobot
+                gives -1 every step). Set to 0 to disable.
+            reward_shaping_fn: Optional function obs → float providing dense
+                shaped reward for training. When set, overrides both
+                use_env_reward and goal reward. Essential for long-horizon
+                tasks where the env reward is too sparse for SF learning.
         """
         self._goal_reward_fn = self.adapter.create_goal_reward_fn(
             goal_spec, reward, default_cost
         )
         self.goal_states = self.adapter.get_goal_states(goal_spec)
         self._use_env_reward = use_env_reward
+        self._terminal_bonus = terminal_bonus
+        self._reward_shaping_fn = reward_shaping_fn
         if not use_env_reward:
             self._reward_fn = self._goal_reward_fn
 
@@ -167,6 +181,7 @@ class NeuralSRAgent:
     def learn_environment(self, num_episodes: int = 1000,
                           steps_per_episode: int = 200,
                           diverse_start: bool = True,
+                          diverse_fraction: float = 1.0,
                           log_interval: int = 100):
         """Learn successor features by exploring the environment.
 
@@ -180,13 +195,17 @@ class NeuralSRAgent:
             num_episodes: Number of training episodes.
             steps_per_episode: Maximum steps per episode.
             diverse_start: If True, start episodes from random states.
+            diverse_fraction: Fraction of episodes using diverse starts
+                (rest use default start). Only applies when diverse_start=True.
+                Set to 1.0 for all-diverse, 0.5 for half-and-half, etc.
             log_interval: Episodes between log prints.
         """
         print(f"Learning with Neural SF ({num_episodes} episodes, "
-              f"sf_dim={self.sf_dim}, ε: {self._epsilon_start}→{self._epsilon_end})...")
+              f"sf_dim={self.sf_dim}, ε: {self.epsilon:.3f}→{self._epsilon_end})...")
 
         for episode in range(num_episodes):
-            if diverse_start:
+            use_diverse = diverse_start and (np.random.rand() < diverse_fraction)
+            if use_diverse:
                 obs = self.adapter.sample_random_state()
             else:
                 obs = self.adapter.reset()
@@ -199,13 +218,20 @@ class NeuralSRAgent:
                 next_obs, env_reward, terminated, truncated, info = \
                     self.adapter.step(action)
 
-                # Use environment reward for dense signal, or goal reward if configured
-                if self._use_env_reward:
+                # Compute reward for training
+                if self._reward_shaping_fn is not None:
+                    # Dense shaped reward — provides gradient signal at every
+                    # step, essential for long-horizon tasks like Acrobot
+                    reward = self._reward_shaping_fn(next_obs)
+                elif self._use_env_reward:
                     reward = env_reward
                 elif self._reward_fn:
                     reward = self._reward_fn(next_obs)
                 else:
                     reward = env_reward
+                # Terminal bonus on top of any reward source
+                if terminated and self._terminal_bonus != 0:
+                    reward += self._terminal_bonus
 
                 self.buffer.add(obs, action, reward, next_obs,
                                 terminated or truncated)
@@ -395,7 +421,12 @@ class NeuralSRAgent:
                     reached_goal = True
                     break
 
-            if terminated or truncated:
+            # Environment terminated (e.g., Acrobot reached height threshold)
+            # counts as goal success; truncation (step limit) does not.
+            if terminated:
+                reached_goal = True
+                break
+            if truncated:
                 break
 
             obs = next_obs

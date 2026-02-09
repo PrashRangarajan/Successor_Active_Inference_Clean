@@ -52,6 +52,7 @@ class HierarchicalNeuralSRAgent(NeuralSRAgent):
         adapter: ContinuousAdapter,
         n_clusters: int = 4,
         cluster_method: str = 'spectral',
+        cluster_on: str = 'embeddings',
         n_cluster_samples: int = 5000,
         adjacency_episodes: int = 500,
         adjacency_episode_length: int = 50,
@@ -61,6 +62,7 @@ class HierarchicalNeuralSRAgent(NeuralSRAgent):
 
         self.n_clusters = n_clusters
         self.cluster_method = cluster_method
+        self.cluster_on = cluster_on
         self._n_cluster_samples = n_cluster_samples
         self._adjacency_episodes = adjacency_episodes
         self._adjacency_episode_length = adjacency_episode_length
@@ -94,9 +96,10 @@ class HierarchicalNeuralSRAgent(NeuralSRAgent):
         n_samples = n_cluster_samples or self._n_cluster_samples
         n_adj_episodes = adjacency_episodes or self._adjacency_episodes
 
-        # Step 1: Cluster SF embeddings
-        print(f"Step 1: Clustering SF embeddings ({n_samples} samples, "
-              f"{self.n_clusters} clusters, method={self.cluster_method})...")
+        # Step 1: Cluster SF embeddings (or observations)
+        print(f"Step 1: Clustering ({n_samples} samples, "
+              f"{self.n_clusters} clusters, method={self.cluster_method}, "
+              f"features={self.cluster_on})...")
         self.clustering = SFClustering(
             n_clusters=self.n_clusters,
             method=self.cluster_method,
@@ -104,7 +107,9 @@ class HierarchicalNeuralSRAgent(NeuralSRAgent):
         observations, embeddings = self.clustering.collect_embeddings(
             self, n_samples=n_samples
         )
-        labels = self.clustering.fit(observations, embeddings)
+        labels = self.clustering.fit(
+            observations, embeddings, cluster_on=self.cluster_on
+        )
 
         stats = self.clustering.get_cluster_stats()
         for c, size in stats['cluster_sizes'].items():
@@ -353,7 +358,16 @@ class HierarchicalNeuralSRAgent(NeuralSRAgent):
                         'final_state': next_obs,
                     }
 
-            if terminated or truncated:
+            # Environment terminated (e.g., Acrobot reached height threshold)
+            # counts as goal success; truncation (step limit) does not.
+            if terminated:
+                return {
+                    'steps': total_steps,
+                    'reward': total_reward,
+                    'reached_goal': True,
+                    'final_state': next_obs,
+                }
+            if truncated:
                 break
 
             obs = next_obs

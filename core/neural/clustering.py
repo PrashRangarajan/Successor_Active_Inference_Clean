@@ -52,42 +52,59 @@ class SFClustering:
     def collect_embeddings(self, agent, n_samples: int = 5000,
                            steps_per_episode: int = 200
                            ) -> Tuple[np.ndarray, np.ndarray]:
-        """Collect observation-embedding pairs via random exploration.
+        """Collect observation-embedding pairs for clustering.
+
+        Prefers sampling from the agent's replay buffer (which contains
+        diverse training experience) for better state coverage. Falls
+        back to random exploration if the buffer is too small.
 
         Args:
             agent: A NeuralSRAgent with a trained SF network.
             n_samples: Target number of observations to collect.
-            steps_per_episode: Steps per exploration episode.
+            steps_per_episode: Steps per exploration episode (fallback).
 
         Returns:
             Tuple of (observations, embeddings) arrays.
         """
         obs_list = []
-        adapter = agent.adapter
 
-        while len(obs_list) < n_samples:
-            obs = adapter.sample_random_state()
-            obs_list.append(obs.copy())
-            for _ in range(steps_per_episode):
-                action = np.random.randint(adapter.n_actions)
-                next_obs, _, terminated, truncated, _ = adapter.step(action)
-                obs_list.append(next_obs.copy())
-                if terminated or truncated:
-                    break
-                if len(obs_list) >= n_samples:
-                    break
+        # Try to sample from replay buffer first — it has diverse training
+        # experience that better covers the state space than random walks
+        if hasattr(agent, 'buffer') and agent.buffer.size >= n_samples:
+            indices = np.random.choice(
+                agent.buffer.size, size=n_samples, replace=False
+            )
+            obs_list = [agent.buffer.obs[i].copy() for i in indices]
+        else:
+            # Fallback: collect via random exploration
+            adapter = agent.adapter
+            while len(obs_list) < n_samples:
+                obs = adapter.sample_random_state()
+                obs_list.append(obs.copy())
+                for _ in range(steps_per_episode):
+                    action = np.random.randint(adapter.n_actions)
+                    next_obs, _, terminated, truncated, _ = adapter.step(action)
+                    obs_list.append(next_obs.copy())
+                    if terminated or truncated:
+                        break
+                    if len(obs_list) >= n_samples:
+                        break
 
         observations = np.array(obs_list[:n_samples], dtype=np.float32)
         embeddings = agent.get_sf_embedding(observations)
         return observations, embeddings
 
-    def fit(self, observations: np.ndarray, embeddings: np.ndarray
-            ) -> np.ndarray:
-        """Cluster embeddings and build the runtime classifier.
+    def fit(self, observations: np.ndarray, embeddings: np.ndarray,
+            cluster_on: str = 'embeddings') -> np.ndarray:
+        """Cluster embeddings (or observations) and build the runtime classifier.
 
         Args:
             observations: Raw observations, shape (n, obs_dim).
             embeddings: SF embeddings, shape (n, sf_dim).
+            cluster_on: What to cluster on — 'embeddings' for SF embeddings,
+                'observations' for raw observation features. Observation-space
+                clustering is more robust when SF embeddings are poorly
+                differentiated (e.g., early training, sparse rewards).
 
         Returns:
             Cluster labels, shape (n,).
@@ -95,14 +112,20 @@ class SFClustering:
         self.observations = observations
         self.embeddings = embeddings
 
-        # Normalize embeddings for better clustering
+        # Select features for clustering
+        if cluster_on == 'observations':
+            features = observations
+        else:
+            features = embeddings
+
+        # Normalize features for better clustering
         self.scaler = StandardScaler()
-        emb_scaled = self.scaler.fit_transform(embeddings)
+        feat_scaled = self.scaler.fit_transform(features)
 
         if self.method == 'spectral':
-            self.labels = self._spectral_cluster(emb_scaled)
+            self.labels = self._spectral_cluster(feat_scaled)
         elif self.method == 'kmeans':
-            self.labels = self._kmeans_cluster(emb_scaled)
+            self.labels = self._kmeans_cluster(feat_scaled)
         else:
             raise ValueError(f"Unknown clustering method: {self.method}")
 
