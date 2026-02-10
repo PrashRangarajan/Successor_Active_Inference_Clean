@@ -231,6 +231,96 @@ NEURAL_ACROBOT = {
 }
 
 # =====================================================================
+# Neural InvertedPendulum (MuJoCo — deep successor features)
+# =====================================================================
+NEURAL_INVERTED_PENDULUM = {
+    # Environment
+    "n_force_bins": 7,              # Discrete forces in [-3, 3]
+
+    # Neural architecture
+    "sf_dim": 64,
+    "hidden_sizes": (128, 128),
+
+    # Training — lower learning rates for stability on survival tasks
+    "gamma": 0.99,
+    "lr": 3e-4,
+    "lr_w": 3e-4,
+    "batch_size": 128,
+    "buffer_size": 200_000,
+    "target_update_freq": 1000,     # Less frequent target updates
+    "tau": 0.005,                   # Softer target updates
+    "steps_per_episode": 500,
+
+    # Training schedule — more episodes for this task
+    "train_episodes_diverse": 2000,   # Phase 1: build SF representation
+    "train_episodes_fixed": 3000,     # Phase 2: mixed training
+    "diverse_fraction": 0.3,
+
+    # Exploration — moderate decay; with reward shaping, early episodes
+    # are longer so steps accumulate faster than without shaping.
+    "epsilon_start": 1.0,
+    "epsilon_end": 0.05,
+    "epsilon_decay_steps": 10_000,
+
+    # Test
+    "test_max_steps": 1000,
+    "reward": 1.0,
+    "default_cost": 0.0,
+    "terminal_bonus": -5.0,          # Penalty for pole falling (termination = failure)
+
+    # Eval-specific
+    "eval_n_runs": 5,
+    "eval_episodes": [500, 1000, 2000, 3000, 5000],
+    "eval_quick_episodes": [500, 1000, 2000],
+    "eval_quick_n_runs": 2,
+}
+
+# =====================================================================
+# Neural HalfCheetah (MuJoCo — deep successor features, action-conditioned)
+# =====================================================================
+NEURAL_HALF_CHEETAH = {
+    # Environment
+    "n_bins_per_joint": 3,          # 3^6 = 729 discrete actions
+
+    # Neural architecture — action-conditioned network for large action space
+    "sf_dim": 128,
+    "hidden_sizes": (256, 256),
+    "sf_network_cls": "action_conditioned",
+
+    # Training
+    "gamma": 0.99,
+    "lr": 3e-4,
+    "lr_w": 3e-4,
+    "batch_size": 256,
+    "buffer_size": 500_000,
+    "target_update_freq": 1000,
+    "tau": 0.005,
+    "steps_per_episode": 500,
+
+    # Training schedule
+    "train_episodes_diverse": 2000,   # Phase 1: build SF representation
+    "train_episodes_fixed": 3000,     # Phase 2: mixed training
+    "diverse_fraction": 0.3,
+
+    # Exploration — faster decay to exploit learned SFs
+    "epsilon_start": 1.0,
+    "epsilon_end": 0.05,
+    "epsilon_decay_steps": 100_000,
+
+    # Test
+    "test_max_steps": 1000,
+    "reward": 1.0,
+    "default_cost": 0.0,
+    "terminal_bonus": 0.0,
+
+    # Eval-specific
+    "eval_n_runs": 3,
+    "eval_episodes": [500, 1000, 2000, 3000, 5000],
+    "eval_quick_episodes": [500, 1000, 2000],
+    "eval_quick_n_runs": 2,
+}
+
+# =====================================================================
 # Shared defaults (replay, Q-learning)
 # =====================================================================
 SHARED = {

@@ -149,7 +149,7 @@ class TestNeuralSRAgent:
         """Verify learn_environment runs without errors."""
         acrobot_agent.learn_environment(
             num_episodes=5,
-            steps_per_episode=20,
+            steps_per_episode=30,
             log_interval=100,  # suppress output
         )
         assert acrobot_agent.total_steps > 0

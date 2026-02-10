@@ -20,7 +20,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from .networks import SFNetwork, RewardFeatureNetwork
+from .networks import SFNetwork, ActionConditionedSFNetwork, RewardFeatureNetwork
 from .replay_buffer import ReplayBuffer
 from .losses import sf_td_loss, reward_prediction_loss
 from .utils import soft_update, hard_update
@@ -70,6 +70,7 @@ class NeuralSRAgent:
         epsilon_decay_steps: int = 50_000,
         grad_clip: float = 1.0,
         device: str = 'cpu',
+        sf_network_cls: str = 'per_action',
     ):
         # Validation
         if not (0 < gamma <= 1):
@@ -87,6 +88,7 @@ class NeuralSRAgent:
         self.tau = tau
         self.grad_clip = grad_clip
         self.device = torch.device(device)
+        self._sf_network_cls = sf_network_cls
 
         # Exploration schedule
         self.epsilon = epsilon_start
@@ -94,11 +96,19 @@ class NeuralSRAgent:
         self._epsilon_end = epsilon_end
         self._epsilon_decay_steps = epsilon_decay_steps
 
-        # Networks
-        self.sf_net = SFNetwork(
+        # Action subset sampling for large action spaces (used in _update_sf).
+        # When n_actions exceeds the threshold, the batch argmax in the Double
+        # DQN target uses a random subset of candidate actions instead of
+        # evaluating all actions — a ~10x speedup for 729-action spaces.
+        self._action_candidate_threshold = 64
+        self._n_action_candidates = min(64, self.n_actions)
+
+        # Networks — select architecture based on action space size
+        NetworkCls = self._resolve_sf_network_cls(sf_network_cls)
+        self.sf_net = NetworkCls(
             self.obs_dim, self.n_actions, sf_dim, hidden_sizes
         ).to(self.device)
-        self.sf_target = SFNetwork(
+        self.sf_target = NetworkCls(
             self.obs_dim, self.n_actions, sf_dim, hidden_sizes
         ).to(self.device)
         hard_update(self.sf_target, self.sf_net)
@@ -135,6 +145,25 @@ class NeuralSRAgent:
             'episode_reward': [],
             'episode_steps': [],
         }
+
+    @staticmethod
+    def _resolve_sf_network_cls(name: str):
+        """Resolve SF network class from string name.
+
+        Args:
+            name: 'per_action' for SFNetwork (small action spaces),
+                  'action_conditioned' for ActionConditionedSFNetwork (large).
+
+        Returns:
+            Network class.
+        """
+        if name == 'per_action':
+            return SFNetwork
+        elif name == 'action_conditioned':
+            return ActionConditionedSFNetwork
+        else:
+            raise ValueError(f"Unknown sf_network_cls: {name}. "
+                             f"Use 'per_action' or 'action_conditioned'.")
 
     # ==================== Goal / Preference ====================
 
@@ -288,6 +317,12 @@ class NeuralSRAgent:
             target = ψ(s') + γ · (1-done) · φ_target(s', argmax_a' Q(s',a'))
             loss = MSE(φ(s,a), target)
 
+        For action-conditioned networks with large action spaces (729+),
+        uses random action subset sampling to approximate the argmax
+        over next-state actions. This reduces the batch forward from
+        O(B * n_actions) to O(B * n_action_candidates), a ~10x speedup
+        for HalfCheetah.
+
         Args:
             batch: Dict with 'obs', 'actions', 'rewards', 'next_obs', 'dones'.
 
@@ -307,9 +342,14 @@ class NeuralSRAgent:
 
         with torch.no_grad():
             # Action selection via online network (Double DQN-style)
-            all_sf_next = self.sf_net(next_obs)  # (B, n_actions, sf_dim)
-            q_next = (all_sf_next * self.w).sum(dim=-1)  # (B, n_actions)
-            next_actions = q_next.argmax(dim=1)  # (B,)
+            # For action-conditioned nets with many actions, use subset sampling
+            if (isinstance(self.sf_net, ActionConditionedSFNetwork)
+                    and self.n_actions > self._action_candidate_threshold):
+                next_actions = self._select_next_actions_subset(next_obs)
+            else:
+                all_sf_next = self.sf_net(next_obs)  # (B, n_actions, sf_dim)
+                q_next = (all_sf_next * self.w).sum(dim=-1)  # (B, n_actions)
+                next_actions = q_next.argmax(dim=1)  # (B,)
 
             # Target SF values
             sf_target_next = self.sf_target.get_sf(
@@ -324,6 +364,37 @@ class NeuralSRAgent:
         self.sf_optimizer.step()
 
         return loss.item()
+
+    def _select_next_actions_subset(self, next_obs: torch.Tensor) -> torch.Tensor:
+        """Approximate argmax_a Q(s', a) using random action subset sampling.
+
+        Instead of evaluating all n_actions (e.g. 729) for each sample in the
+        batch, evaluates a random subset of candidates. The argmax over the
+        subset is a good approximation of the true argmax, especially early in
+        training when Q-values are noisy anyway.
+
+        Uses forward_actions() which is O(B * K) instead of O(B * A) where
+        K << A (e.g., K=64 vs A=729 → ~11x speedup).
+
+        Args:
+            next_obs: Next observations, shape (B, obs_dim).
+
+        Returns:
+            Best action indices (from full action space), shape (B,).
+        """
+        K = self._n_action_candidates
+        # Sample a random subset of action indices
+        candidate_indices = torch.randint(
+            0, self.n_actions, (K,), device=self.device
+        )
+        # Evaluate the subset: (B, K, sf_dim)
+        sf_subset = self.sf_net.forward_actions(next_obs, candidate_indices)
+        # Compute Q-values for subset
+        q_subset = (sf_subset * self.w).sum(dim=-1)  # (B, K)
+        # Best within the subset
+        best_in_subset = q_subset.argmax(dim=1)  # (B,)
+        # Map back to original action indices
+        return candidate_indices[best_in_subset]  # (B,)
 
     def _update_reward_weights(self, batch: Dict[str, torch.Tensor]) -> float:
         """Learn reward weights w such that r(s) ≈ ψ(s)ᵀ · w.
@@ -481,6 +552,10 @@ class NeuralSRAgent:
         Returns the mean SF across actions: mean_a φ(s, a). Useful for
         visualization, t-SNE/UMAP plots, and clustering (Phase 3).
 
+        For large action spaces (action-conditioned networks), samples a
+        subset of actions and computes the mean over that subset, avoiding
+        the expensive all-actions forward pass.
+
         Args:
             obs_batch: Observations, shape (n, obs_dim).
 
@@ -491,8 +566,18 @@ class NeuralSRAgent:
             obs_t = torch.as_tensor(
                 obs_batch, dtype=torch.float32, device=self.device
             )
-            all_sf = self.sf_net(obs_t)  # (n, n_actions, sf_dim)
-            return all_sf.mean(dim=1).cpu().numpy()
+            if (isinstance(self.sf_net, ActionConditionedSFNetwork)
+                    and self.n_actions > self._action_candidate_threshold):
+                # Sample a subset of actions for efficiency
+                K = self._n_action_candidates
+                action_indices = torch.randint(
+                    0, self.n_actions, (K,), device=self.device
+                )
+                sf_subset = self.sf_net.forward_actions(obs_t, action_indices)
+                return sf_subset.mean(dim=1).cpu().numpy()
+            else:
+                all_sf = self.sf_net(obs_t)  # (n, n_actions, sf_dim)
+                return all_sf.mean(dim=1).cpu().numpy()
 
     def get_q_values(self, obs: np.ndarray) -> np.ndarray:
         """Compute Q-values for all actions at a single observation.
@@ -534,6 +619,7 @@ class NeuralSRAgent:
                 'n_actions': self.n_actions,
                 'sf_dim': self.sf_dim,
                 'gamma': self.gamma,
+                'sf_network_cls': self._sf_network_cls,
             },
         }, path)
 
