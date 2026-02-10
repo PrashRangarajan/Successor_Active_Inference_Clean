@@ -204,22 +204,13 @@ def generate_q_video(q_agent, adapter, init_state, goal_loc, max_steps,
 
         return im,
 
-    # Limit frames for long failed episodes (cap at 50 frames)
-    n_frames = min(len(state_locs), 50)
-    if len(state_locs) > 50:
-        # Sample evenly
-        indices = np.linspace(0, len(state_locs) - 1, 50, dtype=int)
-        sampled_locs = [state_locs[i] for i in indices]
-        state_locs_anim = sampled_locs
-    else:
-        state_locs_anim = state_locs
+    # Scale frame interval to keep video duration reasonable
+    # Short episodes (≤50 steps): 500ms per frame; longer: speed up proportionally
+    n_frames = len(state_locs)
+    interval = max(100, min(500, 25000 // n_frames))
 
-    # Replace state_locs for animation
-    orig_state_locs = state_locs
-    state_locs = state_locs_anim
-
-    ani = animation.FuncAnimation(fig, animate_func, np.arange(len(state_locs)),
-                                  init_func=init_func, interval=500, blit=True)
+    ani = animation.FuncAnimation(fig, animate_func, np.arange(n_frames),
+                                  init_func=init_func, interval=interval, blit=True)
     ani.save(save_path)
     plt.close()
     print(f"  Video saved to {save_path}")
@@ -414,8 +405,8 @@ def run_goal_revaluation_experiment(args):
             # Generate Q-learning videos (first run, key budgets only)
             if n == 0 and budget in (0, args.retrain_budgets[-1]):
                 generate_q_video(
-                    q_scratch, q_adapter, 0, args.goal_B, args.max_steps,
-                    save_path=f"{video_dir}/phase2_q_scratch_goal_B_{budget}_retrain.mp4",
+                    q_transfer, q_adapter, 0, args.goal_B, args.max_steps,
+                    save_path=f"{video_dir}/phase2_q_transfer_goal_B_{budget}_retrain.mp4",
                     init_loc=args.init_loc)
 
     return {
@@ -443,8 +434,41 @@ def run_goal_revaluation_experiment(args):
 
 # ==================== Plotting ====================
 
+def _plot_retraining_axes(ax, budgets, sr_hier_mean, sr_hier_sem,
+                          sr_flat_mean, sr_flat_sem,
+                          qt_mean, qt_sem, qs_mean, qs_sem, ylabel):
+    """Draw SR lines and Q-learning curves on a given axes."""
+    # SR horizontal lines with bands
+    ax.axhline(sr_hier_mean, color="C0", linewidth=2.5,
+               label="SR Hierarchy (0 retrain)")
+    ax.axhspan(sr_hier_mean - sr_hier_sem, sr_hier_mean + sr_hier_sem,
+               color="C0", alpha=0.15)
+    ax.axhline(sr_flat_mean, color="C1", linewidth=2.5, linestyle="--",
+               label="SR Flat (0 retrain)")
+    ax.axhspan(sr_flat_mean - sr_flat_sem, sr_flat_mean + sr_flat_sem,
+               color="C1", alpha=0.15)
+
+    # Q-learning curves
+    ax.plot(budgets, qt_mean, "s-", color="C2", linewidth=2, markersize=8,
+            label="Q-Learning (transfer)")
+    ax.fill_between(budgets, qt_mean - qt_sem, qt_mean + qt_sem,
+                    color="C2", alpha=0.3)
+    ax.plot(budgets, qs_mean, "D-", color="C3", linewidth=2, markersize=8,
+            label="Q-Learning (from scratch)")
+    ax.fill_between(budgets, qs_mean - qs_sem, qs_mean + qs_sem,
+                    color="C3", alpha=0.3)
+
+    ax.set_ylabel(ylabel, fontsize=28)
+    ax.tick_params(axis='y', labelsize=26)
+
+
 def plot_retraining_curve(args, data_dir, save_dir, metric="reward"):
     """Plot SR (flat lines) vs Q-learning (rising curves) after goal switch.
+
+    Generates three variants:
+        1. symlog  — log-spaced x-axis (handles budget=0), all points visible
+        2. linear  — standard linear x-axis, full range
+        3. zoomed  — linear x-axis cropped to the rising region only
 
     Args:
         metric: 'reward', 'steps', or 'reached'
@@ -470,44 +494,81 @@ def plot_retraining_curve(args, data_dir, save_dir, metric="reward"):
     qs_mean = np.mean(q_scratch, axis=0)
     qs_sem = np.std(q_scratch, axis=0) / np.sqrt(q_scratch.shape[0])
 
-    # Labels
-    labels = {
+    ylabel = {
         "reward": "Total Reward",
         "steps": "Steps to Goal",
         "reached": "Goal Reached (fraction)",
-    }
+    }.get(metric, metric)
 
-    fig = plt.figure(figsize=(14, 10))
+    common = dict(sr_hier_mean=sr_hier_mean, sr_hier_sem=sr_hier_sem,
+                  sr_flat_mean=sr_flat_mean, sr_flat_sem=sr_flat_sem,
+                  qt_mean=qt_mean, qt_sem=qt_sem,
+                  qs_mean=qs_mean, qs_sem=qs_sem, ylabel=ylabel)
 
-    # SR horizontal lines with bands
-    plt.axhline(sr_hier_mean, color="C0", linewidth=2.5, label="SR Hierarchy (0 retrain)")
-    plt.axhspan(sr_hier_mean - sr_hier_sem, sr_hier_mean + sr_hier_sem,
-                color="C0", alpha=0.15)
-    plt.axhline(sr_flat_mean, color="C1", linewidth=2.5, linestyle="--",
-                label="SR Flat (0 retrain)")
-    plt.axhspan(sr_flat_mean - sr_flat_sem, sr_flat_mean + sr_flat_sem,
-                color="C1", alpha=0.15)
-
-    # Q-learning curves
-    plt.plot(budgets, qt_mean, "s-", color="C2", linewidth=2, markersize=8,
-             label="Q-Learning (transfer)")
-    plt.fill_between(budgets, qt_mean - qt_sem, qt_mean + qt_sem,
-                     color="C2", alpha=0.3)
-    plt.plot(budgets, qs_mean, "D-", color="C3", linewidth=2, markersize=8,
-             label="Q-Learning (from scratch)")
-    plt.fill_between(budgets, qs_mean - qs_sem, qs_mean + qs_sem,
-                     color="C3", alpha=0.3)
-
-    plt.xlabel("Retraining Episodes After Goal Switch", fontsize=28)
-    plt.ylabel(labels.get(metric, metric), fontsize=28)
-    plt.legend(fontsize=20, loc="best")
-    plt.xticks(fontsize=26)
-    plt.yticks(fontsize=26)
-    plt.tight_layout()
-
+    # --- 1. Symlog (default) ---
+    fig, ax = plt.subplots(figsize=(14, 10))
+    _plot_retraining_axes(ax, budgets, **common)
+    ax.set_xscale("symlog", linthresh=10)
+    ax.set_xticks(budgets)
+    ax.set_xticklabels([str(b) for b in budgets], fontsize=20, rotation=45)
+    ax.set_xlabel("Retraining Episodes After Goal Switch", fontsize=28)
+    ax.legend(fontsize=20, loc="best")
+    fig.tight_layout()
     fname = f"goal_revaluation_{metric}.png"
-    plt.savefig(os.path.join(save_dir, fname), format="png")
-    plt.close()
+    fig.savefig(os.path.join(save_dir, fname), format="png")
+    plt.close(fig)
+    print(f"  Saved {save_dir}/{fname}")
+
+    # --- 2. Linear (full range) ---
+    fig, ax = plt.subplots(figsize=(14, 10))
+    _plot_retraining_axes(ax, budgets, **common)
+    ax.set_xticks(budgets)
+    ax.set_xticklabels([str(b) for b in budgets], fontsize=20, rotation=45)
+    ax.set_xlabel("Retraining Episodes After Goal Switch", fontsize=28)
+    ax.legend(fontsize=20, loc="best")
+    fig.tight_layout()
+    fname = f"goal_revaluation_{metric}_linear.png"
+    fig.savefig(os.path.join(save_dir, fname), format="png")
+    plt.close(fig)
+    print(f"  Saved {save_dir}/{fname}")
+
+    # --- 3. Zoomed to rising region ---
+    # Find the range where Q-learning is climbing: from the last budget
+    # where the slower curve (transfer) is still near its minimum to the
+    # first budget where it reaches the SR level.
+    sr_level = max(sr_hier_mean, sr_flat_mean)
+    qt_min = qt_mean[0]
+
+    # Rising region: from first budget to the first budget where transfer
+    # reaches >= 90% of SR performance (or end of budgets).
+    threshold = qt_min + 0.9 * (sr_level - qt_min)
+    zoom_end_idx = len(budgets) - 1
+    for i, v in enumerate(qt_mean):
+        if v >= threshold:
+            zoom_end_idx = min(i + 1, len(budgets) - 1)  # one past
+            break
+
+    # Start one index before the rise begins for context
+    zoom_start_idx = 0
+
+    zi = slice(zoom_start_idx, zoom_end_idx + 1)
+    z_budgets = budgets[zi] if isinstance(budgets, np.ndarray) else budgets[zi]
+
+    fig, ax = plt.subplots(figsize=(14, 10))
+    _plot_retraining_axes(ax, z_budgets,
+                          sr_hier_mean=sr_hier_mean, sr_hier_sem=sr_hier_sem,
+                          sr_flat_mean=sr_flat_mean, sr_flat_sem=sr_flat_sem,
+                          qt_mean=qt_mean[zi], qt_sem=qt_sem[zi],
+                          qs_mean=qs_mean[zi], qs_sem=qs_sem[zi],
+                          ylabel=ylabel)
+    ax.set_xticks(z_budgets)
+    ax.set_xticklabels([str(b) for b in z_budgets], fontsize=20, rotation=45)
+    ax.set_xlabel("Retraining Episodes After Goal Switch", fontsize=28)
+    ax.legend(fontsize=20, loc="best")
+    fig.tight_layout()
+    fname = f"goal_revaluation_{metric}_zoomed.png"
+    fig.savefig(os.path.join(save_dir, fname), format="png")
+    plt.close(fig)
     print(f"  Saved {save_dir}/{fname}")
 
 def plot_phase1_baseline(args, data_dir, save_dir):

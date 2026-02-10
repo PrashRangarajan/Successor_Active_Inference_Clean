@@ -186,6 +186,127 @@ class PendulumAdapter(BinnedContinuousAdapter):
         else:
             raise ValueError(f"Invalid goal specification: {goal_spec}")
 
+    # ==================== Shaped Reward ====================
+
+    def create_shaped_prior(self, scale: float = 10.0) -> np.ndarray:
+        """Create a continuous shaped reward vector C for all states.
+
+        Mirrors the Pendulum-v1 reward structure:
+            r = -(θ² + 0.1·ω² + 0.001·τ²)
+        Since C is per-state (torque is per-action), we use the state part:
+            C(s) = -(θ² + 0.1·ω²)
+
+        The raw values are shifted and rescaled so that the best state
+        (θ=0, ω=0) has C = +scale and the worst state has C = -scale.
+        This positive/negative split is essential for the SR framework:
+        V = M @ C must be positive at desirable states so the agent is
+        attracted toward them.  An all-negative C would make V most
+        positive at poorly-connected edge states (small M rows), producing
+        the opposite of the intended gradient.
+
+        Args:
+            scale: Half-amplitude.  C ∈ [-scale, +scale].
+
+        Returns:
+            C vector of shape (n_states,)
+        """
+        theta_centers, omega_centers = self.get_bin_centers()
+        C_raw = np.zeros(self.n_states)
+        for t in range(self.n_theta_bins):
+            for w in range(self.n_omega_bins):
+                idx = self.state_space.state_to_index((t, w))
+                theta = theta_centers[t]
+                omega = omega_centers[w]
+                C_raw[idx] = -(theta ** 2 + 0.1 * omega ** 2)
+
+        # Shift and rescale to [-scale, +scale]
+        # Best state (θ=0, ω=0) → +scale, worst → -scale
+        c_min, c_max = C_raw.min(), C_raw.max()
+        c_range = c_max - c_min
+        if c_range > 0:
+            C = 2.0 * scale * (C_raw - c_min) / c_range - scale
+        else:
+            C = np.zeros_like(C_raw)
+        return C
+
+    # ==================== Clustering ====================
+
+    def get_clustering_affinity(self, M: np.ndarray,
+                                sigma: float = 1.0,
+                                blend: float = 0.5) -> np.ndarray:
+        """Build a clustering affinity that respects angle periodicity.
+
+        The standard spectral clustering uses M directly as a precomputed
+        affinity.  For the pendulum, θ is periodic: θ = -π and θ = +π are
+        the *same* physical state, but they sit at opposite grid edges.
+        Pure M-based clustering can split these dynamically-connected
+        boundary states into different clusters.
+
+        This method builds a **cylindrical distance kernel** — embedding
+        each state as (cos θ, sin θ, ω) — and blends it with M.  The
+        blend weight is **adaptive**: the spatial kernel contributes more
+        for state pairs where M is poorly estimated (low row sums,
+        indicating sparse visitation) and less where M is reliable.
+        This avoids artificially connecting states that the dynamics
+        show are truly disconnected (e.g. wall-separated regions).
+
+        Args:
+            M: Successor matrix (N × N), already symmetrised.
+            sigma: Bandwidth for the cylindrical RBF kernel.
+            blend: Maximum weight for the spatial kernel.  The per-pair
+                   effective weight is ``blend * (1 - confidence_ij)``
+                   where confidence is derived from M's row sums.
+
+        Returns:
+            Blended affinity matrix (N × N), non-negative and symmetric.
+        """
+        theta_centers, omega_centers = self.get_bin_centers()
+
+        # Normalise ω to similar scale as the unit-circle coords
+        omega_scale = 8.0  # max |ω|
+        N = self.n_states
+        coords = np.zeros((N, 3))  # (cos θ, sin θ, ω_norm)
+
+        for t in range(self.n_theta_bins):
+            for w in range(self.n_omega_bins):
+                idx = self.state_space.state_to_index((t, w))
+                coords[idx, 0] = np.cos(theta_centers[t])
+                coords[idx, 1] = np.sin(theta_centers[t])
+                coords[idx, 2] = omega_centers[w] / omega_scale
+
+        # Pairwise squared Euclidean distance in cylindrical space
+        from scipy.spatial.distance import squareform, pdist
+        D2 = squareform(pdist(coords, 'sqeuclidean'))
+        K_spatial = np.exp(-D2 / (2.0 * sigma ** 2))
+
+        # Normalise M to [0, 1] for fair blending
+        M_min, M_max = M.min(), M.max()
+        if M_max > M_min:
+            M_norm = (M - M_min) / (M_max - M_min)
+        else:
+            M_norm = np.zeros_like(M)
+
+        # Adaptive blend: per-state confidence from M row sums.
+        # Well-visited states have large row sums → trust M more.
+        # Poorly-visited states have small row sums → lean on spatial.
+        row_sums = M.sum(axis=1)
+        rs_max = row_sums.max()
+        if rs_max > 0:
+            confidence = row_sums / rs_max          # 0..1 per state
+        else:
+            confidence = np.zeros(N)
+
+        # Per-pair confidence = min of the two states' confidences
+        conf_i = confidence[:, None]                # (N, 1)
+        conf_j = confidence[None, :]                # (1, N)
+        pair_conf = np.minimum(conf_i, conf_j)      # (N, N)
+
+        # Effective spatial weight: high where confidence is low
+        alpha = blend * (1.0 - pair_conf)            # (N, N) in [0, blend]
+
+        A = (1.0 - alpha) * M_norm + alpha * K_spatial
+        return A
+
     # ==================== Visualization ====================
 
     def get_state_label(self, state_index: int) -> str:

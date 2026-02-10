@@ -1,0 +1,268 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{microtype}
+\usepackage{booktabs}
+
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue,citecolor=blue}
+
+\title{Adaptive Spatial--Dynamical Affinity Blending\\for Macro-State Discovery in\\Successor Representation Agents}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Cylindrical Affinity Kernel for Periodic State Spaces}
+
+\subsection{Problem}
+
+The pendulum state space is parameterised by $(\theta, \omega)$ where
+$\theta \in [-\pi, \pi]$ is \emph{periodic}---the states $\theta = -\pi$
+and $\theta = +\pi$ are physically identical (pendulum hanging straight
+down).  However, in the discretised grid they occupy opposite edges, so
+standard spectral clustering on the successor representation matrix
+$\mathbf{M}$ can fragment dynamically-connected boundary states into
+separate clusters.
+
+\subsection{Cylindrical Embedding}
+
+Instead of operating in the flat $(\theta, \omega)$ space, we embed each
+discrete state $s_{i,j}$ (with bin centres $\theta_i$, $\omega_j$) into
+a 3-dimensional \emph{cylindrical coordinate space}:
+\begin{equation}
+\mathbf{x}_{i,j} = \left(\cos\theta_i,\;\sin\theta_i,\;\frac{\omega_j}{\omega_{\max}}\right)
+\end{equation}
+where $\omega_{\max} = 8.0\;\text{rad/s}$ is the clipping bound for
+angular velocity.  The angle maps onto the unit circle
+($|\cos\theta|, |\sin\theta| \leq 1$), and dividing $\omega$ by
+$\omega_{\max}$ normalises it to $[-1, 1]$, making all three dimensions
+commensurate.
+
+In this embedding, states at $\theta = -\pi$ and $\theta = +\pi$ map to
+the \emph{same point} $(-1, 0, \omega_j/\omega_{\max})$, eliminating the
+boundary discontinuity.
+
+\subsection{Spatial RBF Kernel}
+
+We compute pairwise squared Euclidean distances in the cylindrical space:
+\begin{equation}
+D^2_{(i,j),(k,l)} = \left\|\mathbf{x}_{i,j} - \mathbf{x}_{k,l}\right\|^2
+\end{equation}
+and form a radial basis function (Gaussian) kernel:
+\begin{equation}
+K^{\text{spatial}}_{(i,j),(k,l)} = \exp\!\left(-\frac{D^2_{(i,j),(k,l)}}{2\sigma^2}\right)
+\end{equation}
+with bandwidth $\sigma = 1.0$.  This kernel is symmetric, non-negative,
+and equals~1 on the diagonal.
+
+For non-periodic state spaces (e.g.\ Mountain Car), the embedding reduces
+to normalised Cartesian coordinates and the kernel becomes a standard
+spatial RBF.
+
+\subsection{SR-Based Affinity}
+
+The standard spectral clustering affinity is the symmetrised successor
+matrix:
+\begin{equation}
+\mathbf{A}^{\text{SR}} = \max\!\left(\mathbf{M},\;\mathbf{M}^\top\right)
+\end{equation}
+To blend it with the spatial kernel, we first normalise
+$\mathbf{A}^{\text{SR}}$ to $[0, 1]$:
+\begin{equation}
+\widetilde{\mathbf{A}}^{\text{SR}} = \frac{\mathbf{A}^{\text{SR}} - \min\!\left(\mathbf{A}^{\text{SR}}\right)}{\max\!\left(\mathbf{A}^{\text{SR}}\right) - \min\!\left(\mathbf{A}^{\text{SR}}\right)}
+\end{equation}
+
+\subsection{Adaptive Blending}
+
+A uniform blend weight $\alpha$ applies the spatial kernel equally to all
+state pairs, regardless of how well $\mathbf{M}$ has been estimated.
+This can be problematic: in environments with walls or barriers, two
+states may be spatially adjacent but dynamically disconnected.  A uniform
+spatial kernel would incorrectly boost their affinity, blurring the very
+bottleneck structure that clustering should discover.
+
+We address this with an \emph{adaptive} blend weight that varies per
+state pair based on the confidence in $\mathbf{M}$.  The intuition is
+simple: trust $\mathbf{M}$ where it is reliable; fall back on the spatial
+kernel where it is not.
+
+\paragraph{Per-state confidence.}
+The row sum $r_i = \sum_j M_{ij}$ reflects how well state~$i$ has been
+explored: well-visited states accumulate large successor mass, while
+rarely-visited states (e.g.\ near-goal boundary regions) have small row
+sums.  We normalise to $[0,1]$:
+\begin{equation}
+\hat{c}_i = \frac{r_i}{\max_k\, r_k}
+\end{equation}
+
+\paragraph{Per-pair confidence.}
+For the pair $(i,j)$, we take the minimum of the two states'
+confidences, so that the spatial kernel activates whenever \emph{either}
+state is poorly estimated:
+\begin{equation}
+c_{ij} = \min\!\left(\hat{c}_i,\;\hat{c}_j\right)
+\end{equation}
+
+\paragraph{Adaptive blend weight.}
+The effective spatial weight for pair $(i,j)$ is:
+\begin{equation}
+\alpha_{ij} = \alpha_{\max}\,(1 - c_{ij})
+\end{equation}
+where $\alpha_{\max}$ is the maximum blend weight (a hyperparameter;
+default $0.5$ for the Pendulum, $0.3$ for Mountain Car).  The final
+blended affinity becomes:
+\begin{equation}
+\boxed{A_{ij} = (1 - \alpha_{ij})\,\widetilde{A}^{\text{SR}}_{ij} + \alpha_{ij}\,K^{\text{spatial}}_{ij}}
+\end{equation}
+
+This gives the desired behaviour in three regimes:
+
+\begin{itemize}[leftmargin=2em]
+\item \textbf{Both states well-visited}
+($\hat{c}_i, \hat{c}_j \approx 1$): $\alpha_{ij} \approx 0$.
+The affinity is determined almost entirely by the SR---dynamical barriers
+(walls, unreachable regions) are preserved.
+
+\item \textbf{At least one state poorly-visited}
+($\min(\hat{c}_i, \hat{c}_j) \approx 0$):
+$\alpha_{ij} \approx \alpha_{\max}$.  The spatial kernel fills in for the
+unreliable SR, preventing sparse boundary states from splitting off as
+outlier clusters.
+
+\item \textbf{Periodic boundaries (Pendulum)}:  States at
+$\theta \approx \pm\pi$ are typically well-visited (the pendulum swings
+through the bottom frequently), so $c_{ij}$ is moderate-to-high.  The
+cylindrical kernel still provides a boost because the \emph{spatial}
+distance across the branch cut is zero, while the SR may under-represent
+this connection due to bin discretisation.  The adaptive weight ensures
+this boost is proportionate.
+\end{itemize}
+
+The key property is that $\mathbf{K}^{\text{spatial}}$ is invariant to
+the choice of angle branch cut---$\theta = -\pi$ and $\theta = +\pi$
+have zero distance---so boundary states that are dynamically connected in
+$\mathbf{M}$ are no longer artificially separated by the discretisation.
+
+\subsection{Scope of Application}
+
+The blended affinity $\mathbf{A}$ is used exclusively for \emph{macro-state
+discovery}: it determines the spectral embedding (for visualisation) and
+the spectral clustering (for cluster assignments).  The core micro-level
+quantities---the learned successor matrix $\mathbf{M}$, the transition
+matrix $\mathbf{B}$, and the value function
+$\mathbf{V} = \mathbf{M}\,\mathbf{C}$---remain unmodified.
+
+Macro-level planning matrices ($\mathbf{B}_{\text{macro}}$,
+$\mathbf{M}_{\text{macro}}$) are derived from raw transition counts
+between the resulting clusters, so they are \emph{indirectly} shaped by
+the blended clustering but do not incorporate the spatial kernel
+themselves.
+
+This separation is deliberate: the spatial kernel should produce
+physically coherent macro-state regions without distorting the learned
+dynamics that drive action selection.
+
+%% ====================================================================
+\section{Related Work}
+
+\subsection{Spectral Analysis of the Successor Representation}
+
+Machado, Rosenbaum, Guo \& Liu~\cite{machado2018} proved that the
+eigenvectors of the successor representation matrix $\mathbf{M}$ are
+equivalent to proto-value functions---the eigenvectors of the graph
+Laplacian over the state-transition graph.  Their \emph{eigenoption
+discovery} framework uses spectral decomposition of $\mathbf{M}$ to
+identify bottleneck states and construct temporally abstract actions
+(options).  The earlier Laplacian framework by Machado, Bellemare \&
+Bowling~\cite{machado2017} showed that eigenoptions correspond to
+eigenvectors associated with the largest eigenvalues of the graph
+Laplacian, providing a principled connection between spectral methods and
+option discovery in reinforcement learning.
+
+Our micro-level spectral clustering on $\mathbf{M}$ follows this
+established approach directly.
+
+\subsection{Clustering in Periodic Domains}
+
+Clustering data embedded in spaces with periodic boundary conditions is a
+well-studied problem in computational science.  Standard distance metrics
+treat $\theta = -\pi$ and $\theta = +\pi$ as maximally separated,
+producing artefacts at the domain boundary.  The established solution is
+to embed periodic coordinates on the unit circle
+$(\cos\theta, \sin\theta)$ so that the metric respects the underlying
+topology.  This approach has been applied to $k$-means~\cite{gao2022} and
+DBSCAN~\cite{lazzari2025} in molecular simulation and other periodic
+settings.
+
+\subsection{Multi-Source Affinity Combination}
+
+The idea of combining multiple affinity matrices appears extensively in
+multi-view clustering, where a unified affinity is learned from several
+``views'' of the same data (e.g.\ different feature spaces or
+modalities).  Constrained spectral clustering modifies the affinity
+matrix with must-link / cannot-link constraints or spatial regularisation
+terms~\cite{vonluxburg2007}.  Our convex combination of a dynamics-based
+affinity ($\widetilde{\mathbf{A}}^{\text{SR}}$) with a geometry-based
+kernel ($\mathbf{K}^{\text{spatial}}$) is conceptually analogous,
+treating the successor representation and the physical state layout as
+two complementary views of the same state space.
+
+\subsection{Novelty of the Present Approach}
+
+To our knowledge, the specific combination of a \emph{learned successor
+representation} (dynamics-based affinity) with a \emph{cylindrical
+spatial RBF kernel} (geometry-based affinity respecting angle
+periodicity) via an adaptive, confidence-weighted convex blend for
+macro-state discovery has not appeared in prior work.  The method
+synthesises three established ideas:
+\begin{enumerate}
+\item SR-based spectral clustering for option discovery
+      (Machado~et~al., 2017; 2018),
+\item Cylindrical embedding for periodic state spaces
+      (Gao~et~al., 2022; Lazzari~et~al., 2025), and
+\item Multi-source affinity fusion from multi-view clustering.
+\end{enumerate}
+
+The adaptive confidence weighting (Section~1.5) is, to our knowledge, a
+new contribution that makes the blending robust to environments
+containing dynamical barriers (walls), where a uniform spatial kernel
+would incorrectly smooth over true bottleneck structure.
+
+%% ====================================================================
+\begin{thebibliography}{9}
+
+\bibitem{machado2018}
+Machado, M.~C., Rosenbaum, C., Guo, X., Liu, M., Tesauro, G., \&
+Campbell, M. (2018).
+Eigenoption discovery through the deep successor representation.
+\emph{ICLR 2018}.
+\url{https://arxiv.org/abs/1710.11089}
+
+\bibitem{machado2017}
+Machado, M.~C., Bellemare, M.~G., \& Bowling, M. (2017).
+A Laplacian framework for option discovery in reinforcement learning.
+\emph{ICML 2017}.
+\url{https://arxiv.org/abs/1703.00956}
+
+\bibitem{gao2022}
+Gao, Z., et~al. (2022).
+Using K-means clustering in Python with periodic boundary conditions.
+\emph{Symmetry}, 14(6), 1237.
+\url{https://doi.org/10.3390/sym14061237}
+
+\bibitem{lazzari2025}
+Lazzari, F., et~al. (2025).
+DBSCAN in domains with periodic boundary conditions.
+\url{https://arxiv.org/abs/2501.16894}
+
+\bibitem{vonluxburg2007}
+von Luxburg, U. (2007).
+A tutorial on spectral clustering.
+\emph{Statistics and Computing}, 17(4), 395--416.
+
+\end{thebibliography}
+
+\end{document}

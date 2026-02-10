@@ -437,8 +437,9 @@ class MatrixVizMixin(object):
                    for i in range(n_legend)]
         plt.legend(handles=patches)
 
-        # Custom tick labels showing physical bin centers
+        # Custom tick labels showing physical bin centers (subsampled to avoid clutter)
         if has_centers:
+            max_ticks = 7  # Keep axes readable
             tick_pos0 = np.linspace(
                 extent[0] if extent else 0,
                 extent[1] if extent else bins[0] - 1,
@@ -449,8 +450,13 @@ class MatrixVizMixin(object):
                 extent[3] if extent else bins[1] - 1,
                 bins[1],
             )
-            plt.xticks(ticks=tick_pos0, labels=np.round(centers0, 3), fontsize=10)
-            plt.yticks(ticks=tick_pos1, labels=np.round(centers1, 3), fontsize=10)
+            # Subsample to at most max_ticks evenly spaced ticks
+            step0 = max(1, len(tick_pos0) // max_ticks)
+            step1 = max(1, len(tick_pos1) // max_ticks)
+            idx0 = np.arange(0, len(tick_pos0), step0)
+            idx1 = np.arange(0, len(tick_pos1), step1)
+            plt.xticks(ticks=tick_pos0[idx0], labels=np.round(centers0[idx0], 2), fontsize=10)
+            plt.yticks(ticks=tick_pos1[idx1], labels=np.round(centers1[idx1], 2), fontsize=10)
 
         plt.xlabel(dim0_label, fontsize=12)
         plt.ylabel(dim1_label, fontsize=12)
