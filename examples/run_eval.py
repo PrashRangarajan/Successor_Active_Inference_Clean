@@ -13,6 +13,9 @@ Usage:
     # Run experiments (slow — 20 seeds × 15 checkpoints):
     python examples/run_eval.py --train
 
+    # Run without experience replay (shows hierarchy advantage):
+    python examples/run_eval.py --train --no_replay
+
     # Plot from saved data (fast):
     python examples/run_eval.py
 
@@ -171,6 +174,7 @@ def SR_rewards_values(args):
     """
     n_trials = len(args.episodes)
     grid_size = args.grid_size
+    use_replay = getattr(args, 'use_replay', True)
 
     # Allocate result arrays
     SR_vals = np.zeros((args.n_runs, n_trials))       # V distance (hierarchy)
@@ -219,12 +223,14 @@ def SR_rewards_values(args):
                     agent1, _ = create_sr_agent(
                         grid_size, args.walls, args.n_macro,
                         args.goal_loc, args.goal_val, num_episodes,
+                        use_replay=use_replay,
                     )
 
                     # Fresh SR agent for flat evaluation (independent learning)
                     agent2, _ = create_sr_agent(
                         grid_size, args.walls, args.n_macro,
                         args.goal_loc, args.goal_val, num_episodes,
+                        use_replay=use_replay,
                     )
                 except np.linalg.LinAlgError:
                     print("  LinAlgError — retrying...")
@@ -285,6 +291,7 @@ def SR_distances(args, GOALS):
     SR_dists = []
     SR_dists2 = []
     num_episodes = 1500
+    use_replay = getattr(args, 'use_replay', True)
 
     print("\nComparing Hierarchy and Flat for different goal distances")
 
@@ -300,6 +307,7 @@ def SR_distances(args, GOALS):
             agent1, _ = create_sr_agent(
                 args.grid_size, args.walls, args.n_macro,
                 goal_loc, args.goal_val, num_episodes,
+                use_replay=use_replay,
             )
             agent1.reset_episode(init_state=0)
             result1 = agent1.run_episode_hierarchical(max_steps=200)
@@ -308,6 +316,7 @@ def SR_distances(args, GOALS):
             agent2, _ = create_sr_agent(
                 args.grid_size, args.walls, args.n_macro,
                 goal_loc, args.goal_val, num_episodes,
+                use_replay=use_replay,
             )
             agent2.reset_episode(init_state=0)
             result2 = agent2.run_episode_flat(max_steps=200)
@@ -338,6 +347,8 @@ if __name__ == "__main__":
     parser.add_argument("--layout", type=str, default="serpentine",
                         choices=AVAILABLE_LAYOUTS,
                         help="Wall layout (default: serpentine)")
+    parser.add_argument("--no_replay", action="store_true",
+                        help="Disable experience replay for SR agents")
     args_cli = parser.parse_args()
 
     # Get layout-specific configuration
@@ -351,6 +362,8 @@ if __name__ == "__main__":
         eps = list(GRIDWORLD["eval_quick_episodes"])
         nruns = GRIDWORLD["eval_quick_n_runs"]
 
+    use_replay = not args_cli.no_replay
+
     args = argparse.Namespace(
         grid_size=grid_size,
         n_macro=n_macro,
@@ -360,10 +373,12 @@ if __name__ == "__main__":
         n_runs=args_cli.n_runs if not args_cli.quick else nruns,
         walls=WALLS,
         episodes=eps,
+        use_replay=use_replay,
     )
 
-    data_dir = f"data/eval/gridworld/{args_cli.layout}"
-    save_dir = f"figures/eval/gridworld/{args_cli.layout}"
+    replay_tag = "replay" if use_replay else "no_replay"
+    data_dir = f"data/eval/gridworld/{args_cli.layout}/{replay_tag}"
+    save_dir = f"figures/eval/gridworld/{args_cli.layout}/{replay_tag}"
 
     if args_cli.train:
         os.makedirs(data_dir, exist_ok=True)
@@ -378,7 +393,7 @@ if __name__ == "__main__":
 
         # Run main experiment
         print("=" * 60)
-        print("MAIN EXPERIMENT: Rewards + SR Convergence")
+        print(f"MAIN EXPERIMENT: Rewards + SR Convergence (replay={use_replay})")
         print("=" * 60)
         (SR_vals, SR_vals2, SR_succ, SR_succ2, SR_succ_macro,
          SR_rewards, SR_rewards2, Q_rewards) = SR_rewards_values(args)
@@ -423,8 +438,18 @@ if __name__ == "__main__":
             print(f"\nSaved distance data to {data_dir}/")
 
     else:
-        # Load saved args
+        # Load saved args — try new directory structure first, fall back to old
         args_path = os.path.join(data_dir, "args.json")
+        if not os.path.exists(args_path):
+            # Fall back to old (pre-replay-tag) directory
+            old_data_dir = f"data/eval/gridworld/{args_cli.layout}"
+            old_args_path = os.path.join(old_data_dir, "args.json")
+            if os.path.exists(old_args_path):
+                data_dir = old_data_dir
+                save_dir = f"figures/eval/gridworld/{args_cli.layout}"
+                args_path = old_args_path
+                print(f"Using legacy data directory: {data_dir}")
+
         if os.path.exists(args_path):
             with open(args_path, "r") as f:
                 saved = json.load(f)

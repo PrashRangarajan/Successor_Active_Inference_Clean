@@ -108,6 +108,9 @@ def run_mountain_car_example():
     # Cluster heatmap
     agent.visualize_clusters(save_dir="figures/mountaincar/clustering")
 
+    # Macro action heatmap (target cluster at each state)
+    agent.plot_macro_action_heatmap(save_path="figures/mountaincar/macro_actions.png")
+
     # ==================== Record Episode + Trajectory ====================
     print("\n" + "="*50)
     print("RECORDING VIDEO & TRAJECTORY")
@@ -128,10 +131,18 @@ def run_mountain_car_example():
         # Trajectory colored by macro state
         agent.plot_trajectory_with_macro_states(
             positions, velocities,
-            save_path="figures/mountaincar/trajectory_macro.png",
+            save_path="figures/mountaincar/trajectory_macro_state.png",
+            color_by='macro_state',
         )
 
-        # Trajectory colored by action taken
+        # Trajectory colored by macro action (target cluster)
+        agent.plot_trajectory_with_macro_states(
+            positions, velocities,
+            save_path="figures/mountaincar/trajectory_macro_action.png",
+            color_by='macro_action',
+        )
+
+        # Trajectory colored by micro action taken
         agent.plot_trajectory_with_actions(
             positions, velocities, actions,
             save_path="figures/mountaincar/trajectory_actions.png",
@@ -148,6 +159,7 @@ def run_mountain_car_example():
             agent.generate_combined_video(
                 frames, positions, velocities,
                 save_path="figures/mountaincar/mountain_car_combined.mp4",
+                color_by='macro_action',
             )
 
     env.close()

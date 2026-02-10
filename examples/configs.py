@@ -114,15 +114,17 @@ ACROBOT = {
 # Pendulum
 # =====================================================================
 PENDULUM = {
-    "n_theta_bins": 20,
-    "n_omega_bins": 20,
-    "n_torque_bins": 5,
+    "n_theta_bins": 21,         # Odd → goal region centered on θ=0
+    "n_omega_bins": 21,         # Odd → goal region centered on ω=0
+    "n_torque_bins": 7,         # Includes 0-torque; balanced resolution
     "n_clusters": 4,
-    "gamma": 0.95,
+    "gamma": 0.97,              # Slightly higher for longer-horizon swing-up
     "learning_rate": 0.05,
     "learn_from_experience": True,
-    "train_episodes": 5000,
+    "train_episodes": 9000,
     "test_max_steps": 200,
+    "train_smooth_steps": 1,    # No smooth stepping — shaped reward provides gradient
+    "test_smooth_steps": 1,     # Match train; finer control → better balancing
 
     # Agent
     "reward": 100.0,

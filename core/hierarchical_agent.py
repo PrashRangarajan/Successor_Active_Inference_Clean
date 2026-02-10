@@ -95,6 +95,7 @@ class HierarchicalSRAgent(VisualizationMixin):
         self.C = None  # Micro-level preference
         self.C_macro = None  # Macro-level preference
         self.goal_states = []
+        self._shaped_goal = False  # True when using continuous shaped reward
 
         # Clustering results
         self.macro_state_list = None  # List of lists: micro states in each macro state
@@ -154,14 +155,16 @@ class HierarchicalSRAgent(VisualizationMixin):
         sr_episodes = num_episodes - adj_episodes
 
         # Learn or compute transition and successor matrices
+        # Shaped goals: no absorbing states — the reward gradient does the work
+        absorbing = None if self._shaped_goal else self.goal_states
         if self.learn_from_experience:
-            self.B, self.M = self._learn_sr_from_experience(sr_episodes)
+            self.B, self.M = self._learn_sr_from_experience(sr_episodes,
+                                                             goal_states=absorbing)
         else:
             self.B = self.adapter.get_transition_matrix()
-            # Make goal states absorbing (same treatment as the learned path)
-            if self.goal_states:
+            if absorbing:
                 self.B = self.adapter.normalize_transition_matrix(
-                    self.B, goal_states=self.goal_states
+                    self.B, goal_states=absorbing
                 )
             self.M = self.adapter.compute_successor_from_transition(self.B, self.gamma)
 
@@ -183,7 +186,10 @@ class HierarchicalSRAgent(VisualizationMixin):
             self.adapter.set_learning_mode(False)
 
     def set_goal(self, goal_spec: Any, reward: float = 100.0, default_cost: float = -0.1):
-        """Set the goal for the agent.
+        """Set a sparse goal for the agent.
+
+        Goal states become absorbing in B and receive high reward in C;
+        all other states receive ``default_cost``.
 
         Args:
             goal_spec: Environment-specific goal specification
@@ -192,21 +198,50 @@ class HierarchicalSRAgent(VisualizationMixin):
         """
         self.goal_states = self.adapter.get_goal_states(goal_spec)
         self.C = self.adapter.create_goal_prior(self.goal_states, reward, default_cost)
-        self._policy_compiled = False  # Invalidate cached policy
+        self._shaped_goal = False
+        self._policy_compiled = False
         print(f"Goal states: {self.goal_states}")
+
+    def set_shaped_goal(self, C: np.ndarray, goal_threshold: float = 0.0):
+        """Set a continuous shaped reward prior.
+
+        Unlike ``set_goal``, no states are made absorbing in B.  The reward
+        landscape C is used directly, and ``_is_at_goal`` returns True when
+        the current state's C value exceeds ``goal_threshold``.
+
+        Goal states (for macro-preference and stage-diagram detection) are
+        inferred as the top-valued states whose C value is ≥ 80% of max(C).
+
+        Args:
+            C: Shaped reward vector, one entry per micro state.
+            goal_threshold: C value above which the agent is considered
+                            "at goal" (used by ``_is_at_goal``).
+        """
+        self.C = C
+        self._shaped_goal = True
+        self._goal_threshold = goal_threshold
+        self._policy_compiled = False
+
+        # Infer "goal states" as states whose C value meets the threshold.
+        # For negative-range C (e.g. -(θ² + 0.1·ω²) ∈ [-10, 0]), the old
+        # "0.8 * max(C)" heuristic fails because 0.8 * 0 ≈ 0.  Using the
+        # explicit goal_threshold is robust for any C range.
+        self.goal_states = [i for i in range(len(C)) if C[i] >= goal_threshold]
+        print(f"Shaped goal: {len(self.goal_states)} high-reward states "
+              f"(C ≥ {goal_threshold:.1f}), threshold={goal_threshold:.1f}")
 
     def _is_at_goal(self) -> bool:
         """Check if the agent has reached a goal state.
 
-        Uses the discrete goal-bin check (s_idx in goal_states) as the primary
-        condition.  For continuous environments that implement ``is_terminal()``,
-        the continuous check is used as a tie-breaker: the agent is considered
-        at the goal only if BOTH the discrete bin is a goal bin AND the
-        continuous state is terminal.  This prevents false positives from coarse
-        discretization, where a bin center may be terminal but the actual
-        continuous state is not (or vice versa).
+        For sparse goals, uses the discrete goal-bin check.
+        For shaped goals, checks whether the current state's C value
+        exceeds the goal threshold.
         """
         s_idx = self.adapter.get_current_state_index()
+
+        if self._shaped_goal:
+            return self.C[s_idx] >= self._goal_threshold
+
         in_goal_bin = s_idx in self.goal_states
 
         # If no discrete match, definitely not at goal
@@ -223,7 +258,8 @@ class HierarchicalSRAgent(VisualizationMixin):
 
     # ==================== Successor Representation Learning ====================
 
-    def _learn_sr_from_experience(self, num_episodes: int) -> Tuple[np.ndarray, np.ndarray]:
+    def _learn_sr_from_experience(self, num_episodes: int,
+                                    goal_states: List[int] = None) -> Tuple[np.ndarray, np.ndarray]:
         """Learn transition and successor matrices from random exploration.
 
         For continuous environments (Mountain Car, Acrobot), uses smooth stepping
@@ -231,6 +267,8 @@ class HierarchicalSRAgent(VisualizationMixin):
 
         Args:
             num_episodes: Number of episodes to explore
+            goal_states: States to make absorbing in B.  Pass None to skip
+                         (e.g. for shaped rewards with no absorbing states).
 
         Returns:
             Tuple of (B, M) matrices
@@ -331,8 +369,8 @@ class HierarchicalSRAgent(VisualizationMixin):
 
         print("\nLearning complete")
 
-        # Normalize transition matrix and make goal states absorbing
-        B = self.adapter.normalize_transition_matrix(B, goal_states=self.goal_states)
+        # Normalize transition matrix (and optionally make goal states absorbing)
+        B = self.adapter.normalize_transition_matrix(B, goal_states=goal_states)
 
         if self.use_replay:
             # Bioplausible: learn M via hippocampal-style experience replay.
@@ -510,6 +548,11 @@ class HierarchicalSRAgent(VisualizationMixin):
 
         # Make symmetric for spectral clustering
         M_symmetric = np.maximum(M_valid, M_valid.T)
+
+        # Let the adapter provide a custom affinity (e.g. cylindrical
+        # distance blended with M for periodic state spaces like Pendulum).
+        if hasattr(self.adapter, 'get_clustering_affinity'):
+            M_symmetric = self.adapter.get_clustering_affinity(M_symmetric)
 
         # Compute spectral embedding for visualization
         try:
@@ -743,7 +786,14 @@ class HierarchicalSRAgent(VisualizationMixin):
     def run_episode_hierarchical(self, max_steps: int = 200) -> Dict[str, Any]:
         """Run an episode using hierarchical planning.
 
-        First uses macro-level planning, then switches to micro-level.
+        For sparse goals: macro-level navigation to the goal cluster, then
+        micro-level fine-tuning.  Terminates on goal arrival.
+
+        For shaped goals: the hierarchy is used only for the initial
+        approach — once the agent enters the best macro state it switches
+        to flat micro-level control for the remainder of the episode,
+        accumulating reward by staying in high-value states.
+
         If ``compile_policy()`` has been called, uses O(1) cached lookups.
 
         Args:
@@ -766,7 +816,7 @@ class HierarchicalSRAgent(VisualizationMixin):
             if gs in self.micro_to_macro:
                 goal_macro_states.add(self.micro_to_macro[gs])
 
-        # Hierarchical planning phase
+        # Hierarchical planning phase: navigate to the goal macro state
         while total_steps < max_steps:
             if s_idx not in self.micro_to_macro:
                 break
@@ -774,7 +824,7 @@ class HierarchicalSRAgent(VisualizationMixin):
             s_macro = self.micro_to_macro[s_idx]
 
             if s_macro in goal_macro_states:
-                break  # Reached goal macro state
+                break  # Reached goal macro state — switch to micro
 
             # Compute macro-level values
             V_macro = self.M_macro @ self.C_macro
@@ -794,14 +844,34 @@ class HierarchicalSRAgent(VisualizationMixin):
 
             s_idx = self.adapter.get_current_state_index()
 
-            if self._is_at_goal():
+            if not self._shaped_goal and self._is_at_goal():
                 break
 
-        # Micro-level planning to reach exact goal
-        if not self._is_at_goal() and total_steps < max_steps:
-            steps, reward = self._run_micro_to_goal(max_steps - total_steps)
-            total_steps += steps
-            total_reward += reward
+        # Micro-level phase: fine-grained control
+        # For sparse goals: reach the exact goal state.
+        # For shaped goals: run the full remaining episode, accumulating reward.
+        if total_steps < max_steps:
+            V = self.adapter.multiply_M_C(self.M, self.C)
+            stop_at_goal = not self._shaped_goal
+
+            while total_steps < max_steps:
+                if stop_at_goal and self._is_at_goal():
+                    break
+
+                action = self._select_micro_action(V)
+                n_phys = self._step_with_smooth(action, self.test_smooth_steps)
+                self.current_state = self._get_planning_state()
+                self.state_history.append(self.current_state.copy())
+                self.action_history.append(action)
+
+                s_idx = self.adapter.get_current_state_index()
+                if self.C.ndim == 1:
+                    total_reward += self.C[s_idx]
+                else:
+                    state = self.adapter.state_space.index_to_state(s_idx)
+                    total_reward += self.C[state]
+
+                total_steps += n_phys
 
         return {
             'steps': total_steps,
@@ -929,6 +999,9 @@ class HierarchicalSRAgent(VisualizationMixin):
         the argmax of the transition distribution might be the same state
         for all actions, masking real value differences.
 
+        When the agent is already at a goal state, the best-value action is
+        returned directly (staying in place is desirable for maintenance).
+
         Args:
             V: Value function (flat array)
 
@@ -946,9 +1019,14 @@ class HierarchicalSRAgent(VisualizationMixin):
             expected_value = float(s_flat @ V)
             values.append(expected_value)
 
-        # Select best action that actually changes expected state
         sorted_actions = np.argsort(values)[::-1]
 
+        # At the goal, staying in place is the right thing to do —
+        # skip the "must change state" filter and return highest-value action.
+        if self._is_at_goal():
+            return sorted_actions[0]
+
+        # Away from goal: prefer actions that actually change expected state
         for action in sorted_actions:
             s_next = self.adapter.multiply_B_s(self.B, s_onehot, action)
             if not np.allclose(s_next, s_onehot):
@@ -959,6 +1037,10 @@ class HierarchicalSRAgent(VisualizationMixin):
 
     def run_episode_flat(self, max_steps: int = 200) -> Dict[str, Any]:
         """Run an episode using only micro-level (flat) planning.
+
+        For sparse goals the episode terminates when the goal is reached.
+        For shaped goals the episode runs for the full ``max_steps`` so
+        the agent accumulates reward by staying near the optimum.
 
         If ``compile_policy()`` has been called, uses O(1) cached lookups.
 
@@ -976,8 +1058,12 @@ class HierarchicalSRAgent(VisualizationMixin):
         steps = 0
         reward = 0.0
         s_idx = self.adapter.get_current_state_index()
+        stop_at_goal = not self._shaped_goal
 
-        while steps < max_steps and not self._is_at_goal():
+        while steps < max_steps:
+            if stop_at_goal and self._is_at_goal():
+                break
+
             action = self._select_micro_action(V)
             n_phys = self._step_with_smooth(action, self.test_smooth_steps)
             self.current_state = self._get_planning_state()

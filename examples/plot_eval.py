@@ -64,8 +64,31 @@ def get_distance(grid_size, walls, start, goal):
 
 # ==================== Plot Functions ====================
 
+def _plot_reward_axes(ax, eps_range, mean_hier, std_hier, mean_flat, std_flat,
+                      mean_q=None, std_q=None):
+    """Draw reward curves with confidence bands on a given axes."""
+    ax.plot(eps_range, mean_hier, label="Hierarchy")
+    ax.fill_between(eps_range, mean_hier - std_hier, mean_hier + std_hier,
+                    alpha=0.5)
+    ax.plot(eps_range, mean_flat, label="Flat")
+    ax.fill_between(eps_range, mean_flat - std_flat, mean_flat + std_flat,
+                    alpha=0.5)
+    if mean_q is not None:
+        ax.plot(eps_range, mean_q, label="Q-Learning")
+        ax.fill_between(eps_range, mean_q - std_q, mean_q + std_q, alpha=0.5)
+
+    ax.set_ylabel("Total Reward", fontsize=28)
+    ax.tick_params(axis='y', labelsize=26)
+
+
 def plot_SR_rewards(args, data_dir="data/eval/gridworld", save_dir="figures/eval/gridworld"):
-    """Plot reward curves with confidence bands (Hierarchy vs Flat vs Q-Learning)."""
+    """Plot reward curves with confidence bands (Hierarchy vs Flat vs Q-Learning).
+
+    Generates three variants:
+        1. symlog  — log-spaced x-axis, all checkpoints visible
+        2. linear  — standard linear x-axis, full range
+        3. zoomed  — linear x-axis cropped to the rising region
+    """
     os.makedirs(save_dir, exist_ok=True)
     eps_range = args.episodes
 
@@ -80,44 +103,75 @@ def plot_SR_rewards(args, data_dir="data/eval/gridworld", save_dir="figures/eval
     # Load Q-learning rewards if available
     Q_rewards_path = os.path.join(data_dir, "Q_rewards.npy")
     has_q_learning = os.path.exists(Q_rewards_path)
+    mean_Q_rewards, std_Q_rewards = None, None
     if has_q_learning:
         Q_rewards = np.load(Q_rewards_path)[:, :len(eps_range)]
         mean_Q_rewards = np.mean(Q_rewards, axis=0)
         std_Q_rewards = np.std(Q_rewards, axis=0) / np.sqrt(len(Q_rewards))
 
-    fig = plt.figure(figsize=(14, 10))
-    plt.plot(eps_range, mean_SR_rewards, label="Hierarchy")
-    plt.fill_between(
-        eps_range,
-        mean_SR_rewards - std_SR_rewards,
-        mean_SR_rewards + std_SR_rewards,
-        alpha=0.5,
-    )
-    plt.plot(eps_range, mean_SR_rewards2, label="Flat")
-    plt.fill_between(
-        eps_range,
-        mean_SR_rewards2 - std_SR_rewards2,
-        mean_SR_rewards2 + std_SR_rewards2,
-        alpha=0.5,
-    )
-    if has_q_learning:
-        plt.plot(eps_range, mean_Q_rewards, label="Q-Learning")
-        plt.fill_between(
-            eps_range,
-            mean_Q_rewards - std_Q_rewards,
-            mean_Q_rewards + std_Q_rewards,
-            alpha=0.5,
-        )
+    common = dict(mean_hier=mean_SR_rewards, std_hier=std_SR_rewards,
+                  mean_flat=mean_SR_rewards2, std_flat=std_SR_rewards2,
+                  mean_q=mean_Q_rewards, std_q=std_Q_rewards)
 
-    plt.xlabel("Number of Training Episodes", fontsize=28)
-    plt.ylabel("Total Reward", fontsize=28)
-    plt.legend(fontsize=26)
-    plt.xticks(fontsize=26)
-    plt.yticks(fontsize=26)
-    plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, "reward_obtained.png"), format="png")
-    plt.close()
+    # --- 1. Symlog (default) ---
+    fig, ax = plt.subplots(figsize=(14, 10))
+    _plot_reward_axes(ax, eps_range, **common)
+    ax.set_xscale("symlog", linthresh=10)
+    ax.set_xticks(eps_range)
+    ax.set_xticklabels([str(e) for e in eps_range], fontsize=18, rotation=45)
+    ax.set_xlabel("Number of Training Episodes", fontsize=28)
+    ax.legend(fontsize=26)
+    fig.tight_layout()
+    fig.savefig(os.path.join(save_dir, "reward_obtained.png"), format="png")
+    plt.close(fig)
     print(f"  Saved {save_dir}/reward_obtained.png")
+
+    # --- 2. Linear (full range) ---
+    fig, ax = plt.subplots(figsize=(14, 10))
+    _plot_reward_axes(ax, eps_range, **common)
+    ax.set_xticks(eps_range)
+    ax.set_xticklabels([str(e) for e in eps_range], fontsize=18, rotation=45)
+    ax.set_xlabel("Number of Training Episodes", fontsize=28)
+    ax.legend(fontsize=26)
+    fig.tight_layout()
+    fig.savefig(os.path.join(save_dir, "reward_obtained_linear.png"), format="png")
+    plt.close(fig)
+    print(f"  Saved {save_dir}/reward_obtained_linear.png")
+
+    # --- 3. Zoomed to rising region ---
+    # Use the slowest-rising curve to determine the zoom window.
+    # Pick the curve that reaches its plateau last.
+    all_means = [mean_SR_rewards, mean_SR_rewards2]
+    if mean_Q_rewards is not None:
+        all_means.append(mean_Q_rewards)
+    peak = max(m[-1] for m in all_means)
+
+    # Find last index where ANY curve is still below 90% of peak
+    threshold = 0.9 * peak
+    zoom_end_idx = 0
+    for i in range(len(eps_range)):
+        if any(m[i] < threshold for m in all_means):
+            zoom_end_idx = i
+    zoom_end_idx = min(zoom_end_idx + 1, len(eps_range) - 1)  # one past
+
+    zi = slice(0, zoom_end_idx + 1)
+    z_eps = eps_range[zi] if isinstance(eps_range, np.ndarray) else eps_range[zi]
+
+    z_common = dict(mean_hier=mean_SR_rewards[zi], std_hier=std_SR_rewards[zi],
+                    mean_flat=mean_SR_rewards2[zi], std_flat=std_SR_rewards2[zi],
+                    mean_q=mean_Q_rewards[zi] if mean_Q_rewards is not None else None,
+                    std_q=std_Q_rewards[zi] if std_Q_rewards is not None else None)
+
+    fig, ax = plt.subplots(figsize=(14, 10))
+    _plot_reward_axes(ax, z_eps, **z_common)
+    ax.set_xticks(z_eps)
+    ax.set_xticklabels([str(e) for e in z_eps], fontsize=18, rotation=45)
+    ax.set_xlabel("Number of Training Episodes", fontsize=28)
+    ax.legend(fontsize=26)
+    fig.tight_layout()
+    fig.savefig(os.path.join(save_dir, "reward_obtained_zoomed.png"), format="png")
+    plt.close(fig)
+    print(f"  Saved {save_dir}/reward_obtained_zoomed.png")
 
 def plot_SR_values(args, data_dir="data/eval/gridworld", save_dir="figures/eval/gridworld"):
     """Plot SR convergence: goal value distance + successor matrix distance."""

@@ -148,6 +148,83 @@ class MountainCarAdapter(BinnedContinuousAdapter):
         else:
             raise ValueError(f"Invalid goal specification: {goal_spec}")
 
+    # ==================== Clustering ====================
+
+    def get_clustering_affinity(self, M: np.ndarray,
+                                sigma: float = 0.5,
+                                blend: float = 0.3) -> np.ndarray:
+        """Build a clustering affinity that smooths sparse goal-region states.
+
+        Mountain Car's goal region (position > 0.5) is rarely visited during
+        random exploration, so the SR matrix M has noisy/sparse rows there.
+        Pure M-based spectral clustering splits these states into tiny
+        outlier clusters.
+
+        The blend weight is **adaptive**: the spatial kernel contributes
+        more for state pairs where M is poorly estimated (low row sums,
+        indicating sparse visitation) and less where M is reliable.
+        This avoids artificially connecting states that the dynamics
+        show are truly disconnected (e.g. in environments with walls),
+        while still rescuing sparse boundary states from outlier clusters.
+
+        Args:
+            M: Successor matrix (N × N), already symmetrised.
+            sigma: Bandwidth for the spatial RBF kernel.
+            blend: Maximum weight for the spatial kernel.  The per-pair
+                   effective weight is ``blend * (1 - confidence_ij)``
+                   where confidence is derived from M's row sums.
+
+        Returns:
+            Blended affinity matrix (N × N), non-negative and symmetric.
+        """
+        pos_centers, vel_centers = self.get_bin_centers()
+
+        # Normalise both dimensions to [0, 1]
+        pos_range = pos_centers[-1] - pos_centers[0]
+        vel_range = vel_centers[-1] - vel_centers[0]
+
+        N = self.n_states
+        coords = np.zeros((N, 2))
+
+        for p in range(self.n_pos_bins):
+            for v in range(self.n_vel_bins):
+                idx = self.state_space.state_to_index((p, v))
+                coords[idx, 0] = (pos_centers[p] - pos_centers[0]) / pos_range
+                coords[idx, 1] = (vel_centers[v] - vel_centers[0]) / vel_range
+
+        # Pairwise squared Euclidean distance in normalised space
+        from scipy.spatial.distance import squareform, pdist
+        D2 = squareform(pdist(coords, 'sqeuclidean'))
+        K_spatial = np.exp(-D2 / (2.0 * sigma ** 2))
+
+        # Normalise M to [0, 1] for fair blending
+        M_min, M_max = M.min(), M.max()
+        if M_max > M_min:
+            M_norm = (M - M_min) / (M_max - M_min)
+        else:
+            M_norm = np.zeros_like(M)
+
+        # Adaptive blend: per-state confidence from M row sums.
+        # Well-visited states have large row sums → trust M more.
+        # Poorly-visited states have small row sums → lean on spatial.
+        row_sums = M.sum(axis=1)
+        rs_max = row_sums.max()
+        if rs_max > 0:
+            confidence = row_sums / rs_max          # 0..1 per state
+        else:
+            confidence = np.zeros(N)
+
+        # Per-pair confidence = min of the two states' confidences
+        conf_i = confidence[:, None]                # (N, 1)
+        conf_j = confidence[None, :]                # (1, N)
+        pair_conf = np.minimum(conf_i, conf_j)      # (N, N)
+
+        # Effective spatial weight: high where confidence is low
+        alpha = blend * (1.0 - pair_conf)            # (N, N) in [0, blend]
+
+        A = (1.0 - alpha) * M_norm + alpha * K_spatial
+        return A
+
     # ==================== Visualization ====================
 
     def get_state_label(self, state_index: int) -> str:

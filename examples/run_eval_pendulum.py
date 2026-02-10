@@ -51,7 +51,8 @@ from examples.configs import PENDULUM, SHARED
 def create_pendulum_agent(n_theta_bins, n_omega_bins, n_torque_bins, n_clusters,
                           num_episodes, gamma=0.95, learning_rate=0.05,
                           use_replay=True, n_replay_epochs=10,
-                          test_max_steps=200):
+                          test_max_steps=200,
+                          train_smooth_steps=5, test_smooth_steps=5):
     """Create a fresh Pendulum SR agent trained for exactly num_episodes.
 
     Returns:
@@ -74,8 +75,12 @@ def create_pendulum_agent(n_theta_bins, n_omega_bins, n_torque_bins, n_clusters,
         learn_from_experience=True,
         use_replay=use_replay,
         n_replay_epochs=n_replay_epochs,
+        train_smooth_steps=train_smooth_steps,
+        test_smooth_steps=test_smooth_steps,
     )
-    agent.set_goal(None, reward=100.0, default_cost=-1.0)
+    # Shaped goal: mirrors Pendulum-v1 reward -(θ² + 0.1·ω²)
+    C_shaped = adapter_train.create_shaped_prior(scale=10.0)
+    agent.set_shaped_goal(C_shaped, goal_threshold=-1.0)
     agent.learn_environment(num_episodes)
 
     # Switch to test environment (Pendulum has default 200-step limit)
@@ -131,6 +136,8 @@ def pendulum_rewards_experiment(args):
                         use_replay=args.use_replay,
                         n_replay_epochs=args.n_replay_epochs,
                         test_max_steps=args.test_max_steps,
+                        train_smooth_steps=args.train_smooth_steps,
+                        test_smooth_steps=args.test_smooth_steps,
                     )
                 except (np.linalg.LinAlgError, ValueError) as e:
                     print(f"  Error: {e} — retrying...")
@@ -192,6 +199,8 @@ if __name__ == "__main__":
         n_runs=args_cli.n_runs if not args_cli.quick else nruns,
         episodes=eps,
         test_max_steps=test_max_steps,
+        train_smooth_steps=PENDULUM.get("train_smooth_steps", 5),
+        test_smooth_steps=PENDULUM.get("test_smooth_steps", 5),
         use_replay=SHARED["use_replay"],
         n_replay_epochs=SHARED["n_replay_epochs"],
     )
