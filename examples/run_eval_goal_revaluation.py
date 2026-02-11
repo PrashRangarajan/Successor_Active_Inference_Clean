@@ -215,13 +215,24 @@ def generate_q_video(q_agent, adapter, init_state, goal_loc, max_steps,
     plt.close()
     print(f"  Video saved to {save_path}")
 
-    # Restore
-    state_locs = orig_state_locs
 
 # ==================== Agent Factories ====================
 
-def create_sr_agent(grid_size, n_clusters, walls, goal_loc, num_episodes, gamma=0.99):
-    """Create a fresh SR agent trained on a specific goal."""
+def create_sr_agent(grid_size, n_clusters, walls, goal_loc, num_episodes,
+                    gamma=0.99, learn_from_experience=False, use_replay=True,
+                    learning_rate=0.05, flat_only=False):
+    """Create a fresh SR agent trained on a specific goal.
+
+    Args:
+        learn_from_experience: If True, learn B from exploration (shows a
+            real learning curve). If False, compute B analytically (instant).
+        use_replay: If True (default), use experience replay after TD learning.
+            If False, raw TD only (slower convergence, matches legacy behavior).
+        learning_rate: TD learning rate for SR. Legacy hierarchy uses 0.05,
+            legacy flat uses 0.1.
+        flat_only: If True, all episodes go to SR (no adjacency overhead).
+            Matches legacy flat agent behavior.
+    """
     env = SR_Gridworld(grid_size)
     env.set_walls(walls)
     adapter = GridworldAdapter(env, grid_size)
@@ -230,12 +241,41 @@ def create_sr_agent(grid_size, n_clusters, walls, goal_loc, num_episodes, gamma=
         adapter=adapter,
         n_clusters=n_clusters,
         gamma=gamma,
-        learning_rate=0.05,
-        learn_from_experience=False,  # Analytical M (known dynamics)
+        learning_rate=learning_rate,
+        learn_from_experience=learn_from_experience,
+        use_replay=use_replay,
     )
     agent.set_goal(goal_loc, reward=100.0)
-    agent.learn_environment(num_episodes)
+    agent.learn_environment(num_episodes, flat_only=flat_only)
 
+    return agent, adapter
+
+def create_sr_agent_untrained(grid_size, n_clusters, walls, goal_loc,
+                              gamma=0.99, use_replay=True, learning_rate=0.05):
+    """Create an SR agent with goal set but NOT trained.
+
+    Used for incremental learning where the caller will call
+    ``learn_environment_incremental(delta)`` at each checkpoint.
+
+    Args:
+        learning_rate: TD learning rate. Legacy hierarchy=0.05, flat=0.1.
+
+    Returns:
+        Tuple of (agent, adapter)
+    """
+    env = SR_Gridworld(grid_size)
+    env.set_walls(walls)
+    adapter = GridworldAdapter(env, grid_size)
+
+    agent = HierarchicalSRAgent(
+        adapter=adapter,
+        n_clusters=n_clusters,
+        gamma=gamma,
+        learning_rate=learning_rate,
+        learn_from_experience=True,
+        use_replay=use_replay,
+    )
+    agent.set_goal(goal_loc, reward=100.0)
     return agent, adapter
 
 def create_q_agent(grid_size, walls, goal_loc, gamma=0.99):
@@ -436,33 +476,45 @@ def run_goal_revaluation_experiment(args):
 
 def _plot_retraining_axes(ax, budgets, sr_hier_mean, sr_hier_sem,
                           sr_flat_mean, sr_flat_sem,
-                          qt_mean, qt_sem, qs_mean, qs_sem, ylabel):
-    """Draw SR lines and Q-learning curves on a given axes."""
+                          qt_mean, qt_sem, qs_mean, qs_sem, ylabel,
+                          title=None, compact=False):
+    """Draw SR lines and Q-learning curves on a given axes.
+
+    Args:
+        compact: If True, use smaller fonts suitable for multi-panel figures.
+    """
+    lw = 1.8 if compact else 2.5
+    ms = 5 if compact else 8
+    label_fs = 14 if compact else 28
+    tick_fs = 12 if compact else 26
+
     # SR horizontal lines with bands
-    ax.axhline(sr_hier_mean, color="C0", linewidth=2.5,
+    ax.axhline(sr_hier_mean, color="C0", linewidth=lw,
                label="SR Hierarchy (0 retrain)")
     ax.axhspan(sr_hier_mean - sr_hier_sem, sr_hier_mean + sr_hier_sem,
                color="C0", alpha=0.15)
-    ax.axhline(sr_flat_mean, color="C1", linewidth=2.5, linestyle="--",
+    ax.axhline(sr_flat_mean, color="C1", linewidth=lw, linestyle="--",
                label="SR Flat (0 retrain)")
     ax.axhspan(sr_flat_mean - sr_flat_sem, sr_flat_mean + sr_flat_sem,
                color="C1", alpha=0.15)
 
     # Q-learning curves
-    ax.plot(budgets, qt_mean, "s-", color="C2", linewidth=2, markersize=8,
+    ax.plot(budgets, qt_mean, "s-", color="C2", linewidth=lw, markersize=ms,
             label="Q-Learning (transfer)")
     ax.fill_between(budgets, qt_mean - qt_sem, qt_mean + qt_sem,
                     color="C2", alpha=0.3)
-    ax.plot(budgets, qs_mean, "D-", color="C3", linewidth=2, markersize=8,
+    ax.plot(budgets, qs_mean, "D-", color="C3", linewidth=lw, markersize=ms,
             label="Q-Learning (from scratch)")
     ax.fill_between(budgets, qs_mean - qs_sem, qs_mean + qs_sem,
                     color="C3", alpha=0.3)
 
-    ax.set_ylabel(ylabel, fontsize=28)
-    ax.tick_params(axis='y', labelsize=26)
+    ax.set_ylabel(ylabel, fontsize=label_fs)
+    ax.tick_params(axis='y', labelsize=tick_fs)
+    if title:
+        ax.set_title(title, fontsize=label_fs + 2)
 
 
-def plot_retraining_curve(args, data_dir, save_dir, metric="reward"):
+def plot_retraining_curve(args, data_dir, save_dir, metric="reward", layout_name=None):
     """Plot SR (flat lines) vs Q-learning (rising curves) after goal switch.
 
     Generates three variants:
@@ -472,6 +524,7 @@ def plot_retraining_curve(args, data_dir, save_dir, metric="reward"):
 
     Args:
         metric: 'reward', 'steps', or 'reached'
+        layout_name: Optional layout name for the plot title
     """
     os.makedirs(save_dir, exist_ok=True)
     budgets = args.retrain_budgets
@@ -500,10 +553,14 @@ def plot_retraining_curve(args, data_dir, save_dir, metric="reward"):
         "reached": "Goal Reached (fraction)",
     }.get(metric, metric)
 
+    metric_label = {"reward": "Reward", "steps": "Steps", "reached": "Goal Reached"}.get(metric, metric)
+    title = f"Goal Revaluation — {layout_name.capitalize()} ({metric_label})" if layout_name else None
+
     common = dict(sr_hier_mean=sr_hier_mean, sr_hier_sem=sr_hier_sem,
                   sr_flat_mean=sr_flat_mean, sr_flat_sem=sr_flat_sem,
                   qt_mean=qt_mean, qt_sem=qt_sem,
-                  qs_mean=qs_mean, qs_sem=qs_sem, ylabel=ylabel)
+                  qs_mean=qs_mean, qs_sem=qs_sem, ylabel=ylabel,
+                  title=title)
 
     # --- 1. Symlog (default) ---
     fig, ax = plt.subplots(figsize=(14, 10))
@@ -560,7 +617,7 @@ def plot_retraining_curve(args, data_dir, save_dir, metric="reward"):
                           sr_flat_mean=sr_flat_mean, sr_flat_sem=sr_flat_sem,
                           qt_mean=qt_mean[zi], qt_sem=qt_sem[zi],
                           qs_mean=qs_mean[zi], qs_sem=qs_sem[zi],
-                          ylabel=ylabel)
+                          ylabel=ylabel, title=title)
     ax.set_xticks(z_budgets)
     ax.set_xticklabels([str(b) for b in z_budgets], fontsize=20, rotation=45)
     ax.set_xlabel("Retraining Episodes After Goal Switch", fontsize=28)
@@ -602,6 +659,527 @@ def plot_phase1_baseline(args, data_dir, save_dir):
     plt.close()
     print(f"  Saved {save_dir}/{fname}")
 
+def _draw_grid_on_ax(ax, grid_size, walls, init_loc, goal_A, goal_B, title):
+    """Draw a gridworld layout diagram on a matplotlib axes."""
+    grid = np.ones((grid_size, grid_size, 3))  # white background
+    for w in walls:
+        grid[w[0], w[1]] = [0.25, 0.25, 0.25]  # dark gray walls
+
+    # Transpose so x=column, y=row with origin at bottom-left
+    ax.imshow(grid.transpose(1, 0, 2), origin='lower', aspect='equal')
+
+    # Draw grid lines
+    for i in range(grid_size + 1):
+        ax.axhline(i - 0.5, color='gray', linewidth=0.5, alpha=0.5)
+        ax.axvline(i - 0.5, color='gray', linewidth=0.5, alpha=0.5)
+
+    # Markers
+    ax.plot(init_loc[0], init_loc[1], 'o', color='limegreen',
+            markersize=14, markeredgecolor='black', markeredgewidth=1.5,
+            label='Start', zorder=5)
+    ax.plot(goal_A[0], goal_A[1], 's', color='red',
+            markersize=14, markeredgecolor='black', markeredgewidth=1.5,
+            label='Goal A', zorder=5)
+    ax.plot(goal_B[0], goal_B[1], '^', color='dodgerblue',
+            markersize=14, markeredgecolor='black', markeredgewidth=1.5,
+            label='Goal B', zorder=5)
+
+    ax.set_xlim(-0.5, grid_size - 0.5)
+    ax.set_ylim(-0.5, grid_size - 0.5)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_title(title, fontsize=16, fontweight='bold')
+
+
+def plot_grid_layout(args, save_dir):
+    """Save a standalone gridworld layout diagram."""
+    os.makedirs(save_dir, exist_ok=True)
+    layout_name = getattr(args, 'layout', 'gridworld')
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    walls = [tuple(w) for w in args.walls] if args.walls else []
+    init_loc = tuple(args.init_loc)
+    goal_A = tuple(args.goal_A)
+    goal_B = tuple(args.goal_B)
+
+    _draw_grid_on_ax(ax, args.grid_size, walls, init_loc, goal_A, goal_B,
+                     f"{layout_name.capitalize()} Layout")
+    ax.legend(fontsize=12, loc='upper right')
+    fig.tight_layout()
+
+    fname = f"grid_layout_{layout_name}.png"
+    fig.savefig(os.path.join(save_dir, fname), format="png", dpi=150)
+    plt.close(fig)
+    print(f"  Saved {save_dir}/{fname}")
+
+
+def _load_layout_data(data_dir, metric):
+    """Load Phase 2 data for a metric from a layout data directory.
+
+    Returns:
+        Dict with sr_hier, sr_flat, q_transfer, q_scratch arrays and budgets,
+        or None if data is missing.
+    """
+    try:
+        args_path = os.path.join(data_dir, "args.json")
+        with open(args_path, "r") as f:
+            saved = json.load(f)
+        budgets = saved["retrain_budgets"]
+
+        sr_hier = np.load(os.path.join(data_dir, f"p2_{metric}_sr_hier.npy"))
+        sr_flat = np.load(os.path.join(data_dir, f"p2_{metric}_sr_flat.npy"))
+        q_transfer = np.load(os.path.join(data_dir, f"p2_{metric}_q_transfer.npy"))
+        q_scratch = np.load(os.path.join(data_dir, f"p2_{metric}_q_scratch.npy"))
+
+        return dict(
+            budgets=budgets, args=saved,
+            sr_hier=sr_hier, sr_flat=sr_flat,
+            q_transfer=q_transfer, q_scratch=q_scratch,
+        )
+    except (FileNotFoundError, KeyError):
+        return None
+
+
+def plot_combined_figure(data_base_dir, save_dir, replay_tag="replay"):
+    """Create a multi-panel figure comparing all layouts side by side.
+
+    Layout: 4 rows × N columns (grid diagram + reward + steps + reached).
+    """
+    layouts = []
+    for name in AVAILABLE_LAYOUTS:
+        d = os.path.join(data_base_dir, name, replay_tag)
+        if os.path.isdir(d) and os.path.exists(os.path.join(d, "args.json")):
+            layouts.append(name)
+
+    if len(layouts) < 2:
+        print("  Skipping combined figure (need data for >= 2 layouts)")
+        return
+
+    os.makedirs(save_dir, exist_ok=True)
+    n_cols = len(layouts)
+    metrics = ["reward", "steps", "reached"]
+    n_rows = 1 + len(metrics)  # grid row + metric rows
+
+    fig, axes = plt.subplots(n_rows, n_cols,
+                             figsize=(7 * n_cols, 5 * n_rows),
+                             gridspec_kw={'height_ratios': [1] + [1.3] * len(metrics)})
+    if n_cols == 1:
+        axes = axes[:, np.newaxis]
+
+    # --- Row 0: Grid layout diagrams ---
+    for ci, layout_name in enumerate(layouts):
+        data = _load_layout_data(os.path.join(data_base_dir, layout_name, replay_tag), "reward")
+        if data is None:
+            continue
+        a = data["args"]
+        walls = [tuple(w) for w in a["walls"]]
+        init_loc = tuple(a["init_loc"])
+        goal_A = tuple(a["goal_A"])
+        goal_B = tuple(a["goal_B"])
+        _draw_grid_on_ax(axes[0, ci], a["grid_size"], walls,
+                         init_loc, goal_A, goal_B, layout_name.capitalize())
+
+    # Add a legend for the grid row markers (from first column only)
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    if handles:
+        axes[0, -1].legend(handles, labels, fontsize=10, loc='upper right')
+
+    # --- Rows 1-3: Metric curves ---
+    ylabel_map = {
+        "reward": "Total Reward",
+        "steps": "Steps to Goal",
+        "reached": "Goal Reached",
+    }
+
+    all_handles, all_labels = None, None
+
+    for ri, metric in enumerate(metrics):
+        row_idx = ri + 1
+        for ci, layout_name in enumerate(layouts):
+            ax = axes[row_idx, ci]
+            data = _load_layout_data(os.path.join(data_base_dir, layout_name, replay_tag), metric)
+            if data is None:
+                ax.text(0.5, 0.5, "No data", transform=ax.transAxes,
+                        ha='center', va='center', fontsize=14)
+                continue
+
+            budgets = data["budgets"]
+            sr_hier = data["sr_hier"]
+            sr_flat = data["sr_flat"]
+            q_transfer = data["q_transfer"]
+            q_scratch = data["q_scratch"]
+
+            sr_hier_mean = float(np.mean(sr_hier))
+            sr_hier_sem = float(np.std(sr_hier) / np.sqrt(len(sr_hier)))
+            sr_flat_mean = float(np.mean(sr_flat))
+            sr_flat_sem = float(np.std(sr_flat) / np.sqrt(len(sr_flat)))
+            qt_mean = np.mean(q_transfer, axis=0)
+            qt_sem = np.std(q_transfer, axis=0) / np.sqrt(q_transfer.shape[0])
+            qs_mean = np.mean(q_scratch, axis=0)
+            qs_sem = np.std(q_scratch, axis=0) / np.sqrt(q_scratch.shape[0])
+
+            # Only show ylabel on leftmost column
+            yl = ylabel_map[metric] if ci == 0 else ""
+            _plot_retraining_axes(
+                ax, budgets,
+                sr_hier_mean=sr_hier_mean, sr_hier_sem=sr_hier_sem,
+                sr_flat_mean=sr_flat_mean, sr_flat_sem=sr_flat_sem,
+                qt_mean=qt_mean, qt_sem=qt_sem,
+                qs_mean=qs_mean, qs_sem=qs_sem,
+                ylabel=yl, compact=True,
+            )
+
+            ax.set_xscale("symlog", linthresh=10)
+            ax.set_xticks(budgets)
+            ax.set_xticklabels([str(b) for b in budgets], fontsize=9, rotation=45)
+
+            # Only show x-label on bottom row
+            if ri == len(metrics) - 1:
+                ax.set_xlabel("Retraining Episodes", fontsize=13)
+
+            # Capture legend handles from first subplot
+            if all_handles is None:
+                all_handles, all_labels = ax.get_legend_handles_labels()
+
+    # Shared legend at the bottom
+    if all_handles:
+        fig.legend(all_handles, all_labels, loc='lower center',
+                   ncol=4, fontsize=13, frameon=True,
+                   bbox_to_anchor=(0.5, -0.02))
+
+    fig.suptitle("Goal Revaluation: SR vs Q-Learning Across Environments",
+                 fontsize=20, fontweight='bold', y=1.01)
+    fig.tight_layout(rect=[0, 0.03, 1, 0.99])
+
+    fname = "goal_revaluation_combined.png"
+    fig.savefig(os.path.join(save_dir, fname), format="png",
+                dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  Saved {save_dir}/{fname}")
+
+
+# ==================== Multi-Phase Timeline ====================
+
+def run_multiphase_experiment(args):
+    """Run a multi-phase goal revaluation experiment on a continuous timeline.
+
+    Protocol:
+        Phase A: Train on Goal A for `phase_budget` episodes, evaluate at checkpoints.
+        Phase B: Switch to Goal B. SR replans instantly. Q-learning retrains for
+                 another `phase_budget` episodes, evaluated at checkpoints.
+        Phase C: Switch to Goal C. Same as B.
+
+    Returns:
+        Dict with timeline arrays for plotting.
+    """
+    phase_budget = args.phase_budget
+    checkpoints = args.phase_checkpoints
+    goals = [args.goal_A, args.goal_B, args.goal_C]
+    goal_labels = ["A", "B", "C"]
+    n_phases = len(goals)
+
+    # Result arrays: (n_runs, n_phases, n_checkpoints)
+    reward_sr_flat = np.zeros((args.n_runs, n_phases, len(checkpoints)))
+    reward_sr_hier = np.zeros((args.n_runs, n_phases, len(checkpoints)))
+    reward_q = np.zeros((args.n_runs, n_phases, len(checkpoints)))
+    reward_q_scratch = np.zeros((args.n_runs, n_phases, len(checkpoints)))
+
+    for run in range(args.n_runs):
+        print(f"\n{'='*50}")
+        print(f"  Multi-phase run {run+1}/{args.n_runs}")
+        print(f"{'='*50}")
+
+        # --- Create Q agents (transfer keeps Q, scratch resets Q at each switch) ---
+        q_agent, q_adapter = create_q_agent(
+            args.grid_size, args.walls, goals[0], args.gamma,
+        )
+        q_scratch_agent, q_scratch_adapter = create_q_agent(
+            args.grid_size, args.walls, goals[0], args.gamma,
+        )
+
+        # SR agent placeholder
+        sr_agent = None
+
+        for phase_idx, goal in enumerate(goals):
+            label = goal_labels[phase_idx]
+            print(f"\n  --- Phase {label}: Goal {goal} ---")
+
+            if phase_idx == 0:
+                use_replay = getattr(args, 'use_replay', True)
+                incremental = getattr(args, 'incremental', False)
+
+                if incremental:
+                    # Incremental mode: ONE agent per mode, trained with
+                    # delta episodes at each checkpoint — matches legacy
+                    # learn_env_likelikood() where partially-learned M
+                    # creates hier vs flat divergence.
+                    # Learning rates match legacy: hier=0.05, flat=0.1
+                    sr_hier_agent, _ = create_sr_agent_untrained(
+                        args.grid_size, args.n_macro, args.walls,
+                        goal, args.gamma, use_replay=use_replay,
+                        learning_rate=0.05,
+                    )
+                    sr_flat_agent, _ = create_sr_agent_untrained(
+                        args.grid_size, args.n_macro, args.walls,
+                        goal, args.gamma, use_replay=use_replay,
+                        learning_rate=0.1,
+                    )
+
+                cumulative = 0
+                for ci, ckpt in enumerate(checkpoints):
+                    train_amount = ckpt - cumulative
+                    if train_amount > 0:
+                        q_agent.learn(train_amount)
+                        q_scratch_agent.learn(train_amount)
+
+                    if ckpt == 0:
+                        # No training yet — random walk times out
+                        untrained_reward = -0.1 * args.max_steps
+                        reward_sr_flat[run, phase_idx, ci] = untrained_reward
+                        reward_sr_hier[run, phase_idx, ci] = untrained_reward
+                    elif incremental:
+                        # Incremental: train the same agents with delta episodes
+                        delta = ckpt - cumulative
+                        if delta > 0:
+                            if cumulative == 0:
+                                # First checkpoint: full learn_environment
+                                sr_hier_agent.learn_environment(ckpt)
+                                sr_flat_agent.learn_environment(ckpt, flat_only=True)
+                            else:
+                                sr_hier_agent.learn_environment_incremental(delta)
+                                sr_flat_agent.learn_environment_incremental(delta, flat_only=True)
+
+                        res = evaluate_agent(sr_hier_agent, 0, args.max_steps, args.n_eval, "hier")
+                        reward_sr_hier[run, phase_idx, ci] = res["reward"]
+
+                        res = evaluate_agent(sr_flat_agent, 0, args.max_steps, args.n_eval, "flat")
+                        reward_sr_flat[run, phase_idx, ci] = res["reward"]
+                    else:
+                        # Fresh-agent mode (default): create independent
+                        # agents from scratch at each checkpoint.
+                        # Hier: lr=0.05 with adjacency/macro overhead
+                        sr_hier_agent, _ = create_sr_agent(
+                            args.grid_size, args.n_macro, args.walls,
+                            goal, ckpt, args.gamma,
+                            learn_from_experience=True,
+                            use_replay=use_replay,
+                            learning_rate=0.05,
+                        )
+                        res = evaluate_agent(sr_hier_agent, 0, args.max_steps, args.n_eval, "hier")
+                        reward_sr_hier[run, phase_idx, ci] = res["reward"]
+
+                        # Flat: lr=0.1, ALL episodes to SR (no adjacency)
+                        sr_flat_agent, _ = create_sr_agent(
+                            args.grid_size, args.n_macro, args.walls,
+                            goal, ckpt, args.gamma,
+                            learn_from_experience=True,
+                            use_replay=use_replay,
+                            learning_rate=0.1,
+                            flat_only=True,
+                        )
+                        res = evaluate_agent(sr_flat_agent, 0, args.max_steps, args.n_eval, "flat")
+                        reward_sr_flat[run, phase_idx, ci] = res["reward"]
+
+                    cumulative = ckpt
+
+                    res = evaluate_agent(q_agent, 0, args.max_steps, args.n_eval, "q")
+                    reward_q[run, phase_idx, ci] = res["reward"]
+
+                    res = evaluate_agent(q_scratch_agent, 0, args.max_steps, args.n_eval, "q")
+                    reward_q_scratch[run, phase_idx, ci] = res["reward"]
+
+                    print(f"    ckpt {ckpt}: SR_flat={reward_sr_flat[run, phase_idx, ci]:.0f}, "
+                          f"SR_hier={reward_sr_hier[run, phase_idx, ci]:.0f}, "
+                          f"Q_xfer={reward_q[run, phase_idx, ci]:.0f}, "
+                          f"Q_scratch={reward_q_scratch[run, phase_idx, ci]:.0f}")
+
+                # Ensure sr_agent is fully trained for subsequent phases
+                if incremental:
+                    sr_agent = sr_hier_agent
+                else:
+                    sr_agent, _ = create_sr_agent(
+                        args.grid_size, args.n_macro, args.walls,
+                        goal, phase_budget, args.gamma,
+                    )
+            else:
+                # Phase B/C: switch goal
+                # SR: instant replan
+                sr_agent.set_goal(goal, reward=100.0)
+                sr_agent._compute_macro_preference()
+
+                # Q transfer: keep old Q-values
+                switch_q_goal(q_agent, q_adapter, goal, reset_q=False)
+                # Q scratch: zero out Q-table
+                switch_q_goal(q_scratch_agent, q_scratch_adapter, goal, reset_q=True)
+
+                cumulative = 0
+                for ci, ckpt in enumerate(checkpoints):
+                    train_amount = ckpt - cumulative
+                    if train_amount > 0:
+                        q_agent.learn(train_amount)
+                        q_scratch_agent.learn(train_amount)
+                    cumulative = ckpt
+
+                    res = evaluate_agent(sr_agent, 0, args.max_steps, args.n_eval, "flat")
+                    reward_sr_flat[run, phase_idx, ci] = res["reward"]
+
+                    res = evaluate_agent(sr_agent, 0, args.max_steps, args.n_eval, "hier")
+                    reward_sr_hier[run, phase_idx, ci] = res["reward"]
+
+                    res = evaluate_agent(q_agent, 0, args.max_steps, args.n_eval, "q")
+                    reward_q[run, phase_idx, ci] = res["reward"]
+
+                    res = evaluate_agent(q_scratch_agent, 0, args.max_steps, args.n_eval, "q")
+                    reward_q_scratch[run, phase_idx, ci] = res["reward"]
+
+                    print(f"    ckpt {ckpt}: SR_flat={reward_sr_flat[run, phase_idx, ci]:.0f}, "
+                          f"SR_hier={reward_sr_hier[run, phase_idx, ci]:.0f}, "
+                          f"Q_xfer={reward_q[run, phase_idx, ci]:.0f}, "
+                          f"Q_scratch={reward_q_scratch[run, phase_idx, ci]:.0f}")
+
+    return {
+        "reward_sr_flat": reward_sr_flat,
+        "reward_sr_hier": reward_sr_hier,
+        "reward_q": reward_q,
+        "reward_q_scratch": reward_q_scratch,
+        "checkpoints": np.array(checkpoints),
+        "goals": [list(g) for g in goals],
+        "goal_labels": goal_labels,
+    }
+
+
+def plot_multiphase_timeline(data_dir, save_dir, args):
+    """Plot the multi-phase timeline showing all goal switches on one x-axis."""
+    os.makedirs(save_dir, exist_ok=True)
+
+    reward_sr_flat = np.load(os.path.join(data_dir, "mp_reward_sr_flat.npy"))
+    reward_sr_hier = np.load(os.path.join(data_dir, "mp_reward_sr_hier.npy"))
+    reward_q = np.load(os.path.join(data_dir, "mp_reward_q.npy"))
+
+    # Q scratch may not exist in older data
+    q_scratch_path = os.path.join(data_dir, "mp_reward_q_scratch.npy")
+    reward_q_scratch = np.load(q_scratch_path) if os.path.exists(q_scratch_path) else None
+
+    with open(os.path.join(data_dir, "mp_args.json"), "r") as f:
+        mp_args = json.load(f)
+
+    checkpoints = mp_args["checkpoints"]
+    goals = mp_args["goals"]
+    goal_labels = mp_args["goal_labels"]
+    phase_budget = mp_args["phase_budget"]
+    n_phases = len(goals)
+    layout_name = mp_args.get("layout", "")
+
+    # Build continuous x-axis: phase 0 checkpoints, then offset by phase_budget per phase
+    x_all = []
+    for p in range(n_phases):
+        x_all.extend([c + p * phase_budget for c in checkpoints])
+    x_all = np.array(x_all)
+
+    # Flatten the (n_runs, n_phases, n_checkpoints) -> (n_runs, n_phases * n_checkpoints)
+    n_runs = reward_sr_flat.shape[0]
+    n_ckpts = len(checkpoints)
+    sr_flat_all = reward_sr_flat.reshape(n_runs, -1)
+    sr_hier_all = reward_sr_hier.reshape(n_runs, -1)
+    q_all = reward_q.reshape(n_runs, -1)
+
+    # Mean and SEM
+    sr_flat_mean = np.mean(sr_flat_all, axis=0)
+    sr_flat_sem = np.std(sr_flat_all, axis=0) / np.sqrt(n_runs)
+    sr_hier_mean = np.mean(sr_hier_all, axis=0)
+    sr_hier_sem = np.std(sr_hier_all, axis=0) / np.sqrt(n_runs)
+    q_mean = np.mean(q_all, axis=0)
+    q_sem = np.std(q_all, axis=0) / np.sqrt(n_runs)
+
+    if reward_q_scratch is not None:
+        qs_all = reward_q_scratch.reshape(n_runs, -1)
+        qs_mean = np.mean(qs_all, axis=0)
+        qs_sem = np.std(qs_all, axis=0) / np.sqrt(n_runs)
+
+    def _decorate_multiphase_ax(ax):
+        """Add phase shading, goal-switch lines, and labels."""
+        phase_colors = ['#e8e8e8', '#f5f5f5', '#e8e8e8']
+        for p in range(n_phases):
+            x_start = p * phase_budget
+            x_end = (p + 1) * phase_budget
+            ax.axvspan(x_start, x_end, alpha=0.3,
+                       color=phase_colors[p % len(phase_colors)], zorder=0)
+            if p > 0:
+                ax.axvline(x_start, color='black', linewidth=2, linestyle='--',
+                           alpha=0.7, zorder=4)
+                ax.annotate(f'Switch to\nGoal {goal_labels[p]}',
+                            xy=(x_start, 100),
+                            xytext=(x_start + phase_budget * 0.05, 105),
+                            fontsize=13, fontweight='bold', color='black',
+                            ha='left', va='bottom')
+            mid_x = x_start + phase_budget / 2
+            ax.text(mid_x, -35, f'Goal {goal_labels[p]}\n{tuple(goals[p])}',
+                    ha='center', va='top', fontsize=12, style='italic',
+                    color='#555555')
+
+        ax.set_xlabel('Cumulative Training Episodes', fontsize=20)
+        ax.set_ylabel('Total Reward', fontsize=20)
+        ax.tick_params(axis='both', labelsize=16)
+        ax.set_xlim(0, n_phases * phase_budget)
+        ax.set_ylim(-40, 115)
+
+    title = f'Multi-Phase Goal Revaluation — {layout_name.capitalize()}' if layout_name else \
+            'Multi-Phase Goal Revaluation'
+
+    # --- Plot 1: SR + Q transfer only ---
+    fig, ax = plt.subplots(figsize=(16, 8))
+    ax.plot(x_all, sr_hier_mean, '-', color='C0', linewidth=2.5,
+            label='SR Hierarchy', zorder=3)
+    ax.fill_between(x_all, sr_hier_mean - sr_hier_sem, sr_hier_mean + sr_hier_sem,
+                    color='C0', alpha=0.15)
+    ax.plot(x_all, sr_flat_mean, '--', color='C1', linewidth=2.5,
+            label='SR Flat', zorder=3)
+    ax.fill_between(x_all, sr_flat_mean - sr_flat_sem, sr_flat_mean + sr_flat_sem,
+                    color='C1', alpha=0.15)
+    ax.plot(x_all, q_mean, 's-', color='C2', linewidth=2, markersize=6,
+            label='Q-Learning (transfer)', zorder=3)
+    ax.fill_between(x_all, q_mean - q_sem, q_mean + q_sem,
+                    color='C2', alpha=0.2)
+    _decorate_multiphase_ax(ax)
+    ax.legend(fontsize=16, loc='lower right')
+    ax.set_title(title, fontsize=22, fontweight='bold')
+    fig.tight_layout()
+    fname = f"goal_revaluation_multiphase_{layout_name}.png" if layout_name else \
+            "goal_revaluation_multiphase.png"
+    fig.savefig(os.path.join(save_dir, fname), format="png", dpi=150)
+    plt.close(fig)
+    print(f"  Saved {save_dir}/{fname}")
+
+    # --- Plot 2: All agents (including Q from scratch) ---
+    if reward_q_scratch is not None:
+        fig, ax = plt.subplots(figsize=(16, 8))
+        ax.plot(x_all, sr_hier_mean, '-', color='C0', linewidth=2.5,
+                label='SR Hierarchy', zorder=3)
+        ax.fill_between(x_all, sr_hier_mean - sr_hier_sem, sr_hier_mean + sr_hier_sem,
+                        color='C0', alpha=0.15)
+        ax.plot(x_all, sr_flat_mean, '--', color='C1', linewidth=2.5,
+                label='SR Flat', zorder=3)
+        ax.fill_between(x_all, sr_flat_mean - sr_flat_sem, sr_flat_mean + sr_flat_sem,
+                        color='C1', alpha=0.15)
+        ax.plot(x_all, q_mean, 's-', color='C2', linewidth=2, markersize=6,
+                label='Q-Learning (transfer)', zorder=3)
+        ax.fill_between(x_all, q_mean - q_sem, q_mean + q_sem,
+                        color='C2', alpha=0.2)
+        ax.plot(x_all, qs_mean, 'D-', color='C3', linewidth=2, markersize=5,
+                label='Q-Learning (from scratch)', zorder=3)
+        ax.fill_between(x_all, qs_mean - qs_sem, qs_mean + qs_sem,
+                        color='C3', alpha=0.2)
+        _decorate_multiphase_ax(ax)
+        ax.legend(fontsize=16, loc='lower right')
+        ax.set_title(title, fontsize=22, fontweight='bold')
+        fig.tight_layout()
+        fname = f"goal_revaluation_multiphase_all_{layout_name}.png" if layout_name else \
+                "goal_revaluation_multiphase_all.png"
+        fig.savefig(os.path.join(save_dir, fname), format="png", dpi=150)
+        plt.close(fig)
+        print(f"  Saved {save_dir}/{fname}")
+
+
 # ==================== Main ====================
 
 if __name__ == "__main__":
@@ -621,10 +1199,18 @@ if __name__ == "__main__":
     )
     parser.add_argument("--train", action="store_true", help="Run experiments")
     parser.add_argument("--quick", action="store_true", help="Quick test")
+    parser.add_argument("--multiphase", action="store_true",
+                        help="Run multi-phase timeline experiment (A->B->C)")
     parser.add_argument("--n_runs", type=int, default=nruns)
     parser.add_argument("--layout", type=str, default="serpentine",
                         choices=AVAILABLE_LAYOUTS,
                         help="Wall layout (default: serpentine)")
+    parser.add_argument("--no_replay", action="store_true",
+                        help="Disable experience replay for SR (raw TD only)")
+    parser.add_argument("--incremental", action="store_true",
+                        help="Use incremental training (same agent, delta episodes) "
+                             "instead of fresh agents at each checkpoint. "
+                             "Matches legacy behavior and shows hier vs flat divergence.")
     args_cli = parser.parse_args()
 
     if args_cli.quick:
@@ -638,6 +1224,7 @@ if __name__ == "__main__":
     WALLS = _layout.walls
     goal_A = _layout.default_goal
     goal_B = _layout.alt_goal
+    goal_C = _layout.third_goal
     n_macro = _layout.n_clusters
 
     args = argparse.Namespace(
@@ -647,6 +1234,7 @@ if __name__ == "__main__":
         init_loc=init_loc,
         goal_A=goal_A,
         goal_B=goal_B,
+        goal_C=goal_C,
         walls=WALLS,
         layout=args_cli.layout,
         initial_train_episodes=initial_train_episodes,
@@ -656,8 +1244,10 @@ if __name__ == "__main__":
         n_runs=args_cli.n_runs if not args_cli.quick else nruns,
     )
 
-    data_dir = f"data/eval/goal_revaluation/{args_cli.layout}"
-    save_dir = f"figures/eval/goal_revaluation/{args_cli.layout}"
+    use_replay = not args_cli.no_replay
+    replay_tag = "replay" if use_replay else "no_replay"
+    data_dir = f"data/eval/goal_revaluation/{args_cli.layout}/{replay_tag}"
+    save_dir = f"figures/eval/goal_revaluation/{args_cli.layout}/{replay_tag}"
 
     if args_cli.train:
         os.makedirs(data_dir, exist_ok=True)
@@ -680,6 +1270,7 @@ if __name__ == "__main__":
         print(f"Initial training: {args.initial_train_episodes} eps")
         print(f"Retrain budgets: {args.retrain_budgets}")
         print(f"Runs: {args.n_runs}, Eval episodes: {args.n_eval}")
+        print(f"Replay: {use_replay}")
 
         t0 = time.time()
         results = run_goal_revaluation_experiment(args)
@@ -691,7 +1282,75 @@ if __name__ == "__main__":
             np.save(os.path.join(data_dir, f"{key}.npy"), arr)
         print(f"\nSaved all data to {data_dir}/")
 
-    else:
+    # ---- Multi-phase experiment ----
+    if args_cli.multiphase and args_cli.train:
+        if not use_replay:
+            # No replay: slower convergence, need wider checkpoint range.
+            # Fine-grained in 0-750 to capture hier vs flat divergence,
+            # extended to 8000 so flat SR converges on harder layouts
+            # (serpentine flat needs ~6000 episodes without replay).
+            if args_cli.quick:
+                phase_budget = 5000
+                phase_checkpoints = [0, 100, 200, 500, 750, 1000, 2000, 3000, 5000]
+                mp_n_runs = 3
+            else:
+                phase_budget = 8000
+                phase_checkpoints = [0, 50, 100, 150, 200, 300, 400, 500, 750, 1000, 1500, 2000, 3000, 4000, 5000, 6000, 8000]
+                mp_n_runs = args.n_runs
+        else:
+            # With replay: both SR converge very fast (~100-200 eps).
+            # Tighter budget so the plot zooms into the interesting region.
+            if args_cli.quick:
+                phase_budget = 1000
+                phase_checkpoints = [0, 50, 100, 150, 200, 300, 400, 500, 750, 1000]
+                mp_n_runs = 3
+            else:
+                phase_budget = 1500
+                phase_checkpoints = [0, 25, 50, 75, 100, 150, 200, 300, 400, 500, 750, 1000, 1500]
+                mp_n_runs = args.n_runs
+
+        mp_args = argparse.Namespace(
+            grid_size=grid_size, n_macro=n_macro, gamma=gamma,
+            init_loc=init_loc, walls=WALLS, layout=args_cli.layout,
+            goal_A=goal_A, goal_B=goal_B, goal_C=goal_C,
+            phase_budget=phase_budget, phase_checkpoints=phase_checkpoints,
+            n_eval=n_eval, max_steps=max_steps, n_runs=mp_n_runs,
+            use_replay=use_replay,
+            incremental=args_cli.incremental,
+        )
+
+        print("\n" + "=" * 60)
+        print("MULTI-PHASE TIMELINE EXPERIMENT")
+        print("=" * 60)
+        print(f"Goals: A={goal_A}, B={goal_B}, C={goal_C}")
+        print(f"Phase budget: {phase_budget}, Checkpoints: {phase_checkpoints}")
+        print(f"Runs: {mp_n_runs}, Replay: {use_replay}, Incremental: {args_cli.incremental}")
+
+        t0 = time.time()
+        mp_results = run_multiphase_experiment(mp_args)
+        elapsed = time.time() - t0
+        print(f"\nMulti-phase experiment completed in {elapsed:.0f}s")
+
+        # Save
+        os.makedirs(data_dir, exist_ok=True)
+        np.save(os.path.join(data_dir, "mp_reward_sr_flat.npy"), mp_results["reward_sr_flat"])
+        np.save(os.path.join(data_dir, "mp_reward_sr_hier.npy"), mp_results["reward_sr_hier"])
+        np.save(os.path.join(data_dir, "mp_reward_q.npy"), mp_results["reward_q"])
+        np.save(os.path.join(data_dir, "mp_reward_q_scratch.npy"), mp_results["reward_q_scratch"])
+
+        mp_save = {
+            "checkpoints": mp_results["checkpoints"].tolist(),
+            "goals": mp_results["goals"],
+            "goal_labels": mp_results["goal_labels"],
+            "phase_budget": phase_budget,
+            "layout": args_cli.layout,
+            "n_runs": mp_n_runs,
+        }
+        with open(os.path.join(data_dir, "mp_args.json"), "w") as f:
+            json.dump(mp_save, f, indent=2)
+        print(f"Saved multi-phase data to {data_dir}/")
+
+    elif not args_cli.train:
         # Load saved args
         args_path = os.path.join(data_dir, "args.json")
         if os.path.exists(args_path):
@@ -712,6 +1371,10 @@ if __name__ == "__main__":
     print("=" * 60)
 
     os.makedirs(save_dir, exist_ok=True)
+    layout_name = getattr(args, 'layout', args_cli.layout)
+
+    # Grid layout diagram
+    plot_grid_layout(args, save_dir)
 
     # Phase 1 baseline
     if os.path.exists(os.path.join(data_dir, "p1_reward_sr_hier.npy")):
@@ -719,12 +1382,24 @@ if __name__ == "__main__":
 
     # Phase 2: retraining curves
     if os.path.exists(os.path.join(data_dir, "p2_reward_sr_hier.npy")):
-        plot_retraining_curve(args, data_dir, save_dir, metric="reward")
+        plot_retraining_curve(args, data_dir, save_dir, metric="reward",
+                              layout_name=layout_name)
 
     if os.path.exists(os.path.join(data_dir, "p2_steps_sr_hier.npy")):
-        plot_retraining_curve(args, data_dir, save_dir, metric="steps")
+        plot_retraining_curve(args, data_dir, save_dir, metric="steps",
+                              layout_name=layout_name)
 
     if os.path.exists(os.path.join(data_dir, "p2_reached_sr_hier.npy")):
-        plot_retraining_curve(args, data_dir, save_dir, metric="reached")
+        plot_retraining_curve(args, data_dir, save_dir, metric="reached",
+                              layout_name=layout_name)
+
+    # Multi-phase timeline plot (if data exists)
+    if os.path.exists(os.path.join(data_dir, "mp_reward_sr_flat.npy")):
+        plot_multiphase_timeline(data_dir, save_dir, args)
+
+    # Combined cross-layout figure (uses all available layout data for this replay mode)
+    data_base_dir = "data/eval/goal_revaluation"
+    combined_save_dir = "figures/eval/goal_revaluation"
+    plot_combined_figure(data_base_dir, combined_save_dir, replay_tag)
 
     print(f"\nDone! Figures saved to {save_dir}/")

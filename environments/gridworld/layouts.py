@@ -22,6 +22,7 @@ class GridworldLayout:
     default_goal: Tuple[int, int]   # primary goal (single-goal scripts)
     alt_goal: Tuple[int, int]       # secondary goal (goal-revaluation)
     n_clusters: int                 # recommended number of macro clusters
+    third_goal: Tuple[int, int] = None  # optional third goal for multi-phase experiments
 
 
 AVAILABLE_LAYOUTS = ["serpentine", "fourrooms", "fiverooms"]
@@ -52,6 +53,7 @@ def get_layout(name: str, grid_size: int = 9) -> GridworldLayout:
             default_goal=(grid_size - 1, grid_size - 1),
             alt_goal=(0, grid_size - 1),
             n_clusters=4,
+            third_goal=(grid_size - 1, 0),
         )
     elif name == "fourrooms":
         walls = (
@@ -63,6 +65,7 @@ def get_layout(name: str, grid_size: int = 9) -> GridworldLayout:
             default_goal=(grid_size - 1, grid_size - 1),
             alt_goal=(grid_size - 1, 0),
             n_clusters=4,
+            third_goal=(0, grid_size - 1),
         )
     elif name == "fiverooms":
         # Two large rooms on top separated by a vertical wall at col 4,
@@ -80,6 +83,7 @@ def get_layout(name: str, grid_size: int = 9) -> GridworldLayout:
             default_goal=(grid_size - 1, grid_size - 1),
             alt_goal=(grid_size - 1, 0),
             n_clusters=5,
+            third_goal=(0, grid_size - 1),
         )
     else:
         raise ValueError(

@@ -127,11 +127,14 @@ class HierarchicalSRAgent(VisualizationMixin):
 
     # ==================== Core Learning ====================
 
-    def learn_environment(self, num_episodes: int = 1000):
+    def learn_environment(self, num_episodes: int = 1000, flat_only: bool = False):
         """Main learning routine: learn SR, cluster, learn adjacency.
 
         Args:
             num_episodes: Number of episodes for learning
+            flat_only: If True, skip adjacency/macro learning and dedicate ALL
+                episodes to SR learning.  Matches legacy flat agent behavior
+                where no hierarchy overhead exists.
         """
         print("Learning environment dynamics...")
 
@@ -147,12 +150,20 @@ class HierarchicalSRAgent(VisualizationMixin):
         if hasattr(self.adapter, 'set_learning_mode'):
             self.adapter.set_learning_mode(True)
 
-        # Compute episode budget for adjacency learning:
-        # At least 20% of episodes or 1/n_actions (whichever is larger), minimum 500
-        adj_episodes = max(num_episodes // 5,
-                           num_episodes // self.adapter.n_actions,
-                           500)
-        sr_episodes = num_episodes - adj_episodes
+        if flat_only:
+            # Flat mode: ALL episodes go to SR learning (no adjacency overhead).
+            # Matches legacy flat.py where learn_env_likelikood passes all
+            # episodes to learn_successor_transition_matrix.
+            sr_episodes = num_episodes
+            adj_episodes = 0
+        else:
+            # Hierarchy mode: proportional split matching legacy hierarchy.py.
+            # Adjacency gets 1/n_actions of budget, SR gets the rest.
+            # No hard minimum floor — at low episode counts, SR learning needs
+            # every episode it can get to converge early.
+            adj_episodes = max(num_episodes // 5,
+                               num_episodes // self.adapter.n_actions)
+            sr_episodes = num_episodes - adj_episodes
 
         # Learn or compute transition and successor matrices
         # Shaped goals: no absorbing states — the reward gradient does the work
@@ -168,20 +179,94 @@ class HierarchicalSRAgent(VisualizationMixin):
                 )
             self.M = self.adapter.compute_successor_from_transition(self.B, self.gamma)
 
-        print("Learning macro state clusters...")
-        self.macro_state_list, self.micro_to_macro = self._learn_macro_clusters()
+        if flat_only:
+            # Skip macro-level learning entirely — flat agent only needs M
+            print("Flat-only mode: skipping macro clustering/adjacency")
+        else:
+            print("Learning macro state clusters...")
+            self.macro_state_list, self.micro_to_macro = self._learn_macro_clusters()
 
-        # Create macro-level preference from micro-level
-        self._compute_macro_preference()
+            # Create macro-level preference from micro-level
+            self._compute_macro_preference()
 
-        print("Learning macro state adjacency...")
-        self.adj_list, self.bottleneck_states = self._learn_adjacency(adj_episodes)
-        print(f"Adjacency list: {self.adj_list}")
+            print("Learning macro state adjacency...")
+            self.adj_list, self.bottleneck_states = self._learn_adjacency(adj_episodes)
+            print(f"Adjacency list: {self.adj_list}")
 
-        # Compute macro-level transition and successor matrices
-        self.B_macro, self.M_macro = self._compute_macro_matrices()
+            # Compute macro-level transition and successor matrices
+            self.B_macro, self.M_macro = self._compute_macro_matrices()
 
         # Exit learning mode
+        if hasattr(self.adapter, 'set_learning_mode'):
+            self.adapter.set_learning_mode(False)
+
+    def learn_environment_incremental(self, delta_episodes: int, flat_only: bool = False):
+        """Incremental learning: add more episodes of experience to existing B/M.
+
+        Unlike ``learn_environment()`` which starts fresh, this method builds on
+        the existing B and M matrices — matching the legacy ``learn_env_likelikood``
+        behavior where the same agent is trained with delta episodes at each
+        checkpoint.
+
+        The interaction between partial M, re-clustering, and re-adjacency at each
+        checkpoint is what produces the hierarchy vs flat divergence: hierarchy can
+        exploit a partially-learned M better than flat navigation.
+
+        Args:
+            delta_episodes: Number of *additional* episodes to train
+            flat_only: If True, skip adjacency/macro learning and dedicate ALL
+                episodes to SR learning.  Matches legacy flat agent behavior.
+        """
+        print(f"Incremental learning: {delta_episodes} more episodes...")
+
+        # Resolve effective train smooth steps
+        if self.train_smooth_steps is not None:
+            self._effective_train_smooth = self.train_smooth_steps
+        else:
+            is_continuous = not hasattr(self.adapter, 'grid_size')
+            self._effective_train_smooth = 10 if is_continuous else 1
+
+        if hasattr(self.adapter, 'set_learning_mode'):
+            self.adapter.set_learning_mode(True)
+
+        if flat_only:
+            # Flat mode: ALL episodes go to SR (no adjacency overhead)
+            sr_episodes = delta_episodes
+            adj_episodes = 0
+        else:
+            # Hierarchy mode: proportional split (no hard floor)
+            adj_episodes = max(delta_episodes // 5,
+                               delta_episodes // self.adapter.n_actions)
+            sr_episodes = delta_episodes - adj_episodes
+
+        # Learn SR incrementally (reuses existing B, M)
+        absorbing = None if self._shaped_goal else self.goal_states
+        if self.learn_from_experience:
+            self.B, self.M = self._learn_sr_from_experience(
+                sr_episodes, goal_states=absorbing, incremental=True)
+        else:
+            self.B = self.adapter.get_transition_matrix()
+            if absorbing:
+                self.B = self.adapter.normalize_transition_matrix(
+                    self.B, goal_states=absorbing)
+            self.M = self.adapter.compute_successor_from_transition(self.B, self.gamma)
+
+        if flat_only:
+            print("Flat-only mode: skipping macro re-clustering/adjacency")
+        else:
+            # Re-cluster on the updated M
+            print("Re-clustering macro states...")
+            self.macro_state_list, self.micro_to_macro = self._learn_macro_clusters()
+            self._compute_macro_preference()
+
+            # Re-learn adjacency
+            print("Re-learning adjacency...")
+            self.adj_list, self.bottleneck_states = self._learn_adjacency(adj_episodes)
+            print(f"Adjacency list: {self.adj_list}")
+
+            # Recompute macro matrices
+            self.B_macro, self.M_macro = self._compute_macro_matrices()
+
         if hasattr(self.adapter, 'set_learning_mode'):
             self.adapter.set_learning_mode(False)
 
@@ -259,7 +344,8 @@ class HierarchicalSRAgent(VisualizationMixin):
     # ==================== Successor Representation Learning ====================
 
     def _learn_sr_from_experience(self, num_episodes: int,
-                                    goal_states: List[int] = None) -> Tuple[np.ndarray, np.ndarray]:
+                                    goal_states: List[int] = None,
+                                    incremental: bool = False) -> Tuple[np.ndarray, np.ndarray]:
         """Learn transition and successor matrices from random exploration.
 
         For continuous environments (Mountain Car, Acrobot), uses smooth stepping
@@ -269,12 +355,21 @@ class HierarchicalSRAgent(VisualizationMixin):
             num_episodes: Number of episodes to explore
             goal_states: States to make absorbing in B.  Pass None to skip
                          (e.g. for shaped rewards with no absorbing states).
+            incremental: If True, build on existing B and M matrices instead
+                         of starting fresh.  Matches legacy incremental learning
+                         where the same agent accumulates experience across
+                         multiple calls.
 
         Returns:
             Tuple of (B, M) matrices
         """
-        B = self.adapter.create_empty_transition_matrix()
-        M = self.adapter.create_empty_successor_matrix()
+        if incremental and self.B is not None and self.M is not None:
+            # Reuse existing matrices — new transitions accumulate on top
+            B = self.B.copy()
+            M = self.M.copy()
+        else:
+            B = self.adapter.create_empty_transition_matrix()
+            M = self.adapter.create_empty_successor_matrix()
 
         episode_length = 40
         experiences = []
@@ -382,9 +477,11 @@ class HierarchicalSRAgent(VisualizationMixin):
                   f"{n_transitions} transitions, mode={self.replay_mode})...")
             self._replay_sr_updates(M, self.n_replay_epochs, replay_lr)
         else:
-            # Analytical fallback: fast but not bioplausible (matrix inverse).
-            print("Computing M analytically from B...")
-            M = self.adapter.compute_successor_from_transition(B, self.gamma)
+            # No replay: keep the TD-learned M as-is (raw incremental learning).
+            # This matches legacy behavior where M converges slowly via online
+            # TD updates — hierarchy can exploit a partially-learned M better
+            # than flat, producing a visible convergence gap.
+            print("Using raw TD-learned M (no replay, no analytical fallback)")
 
         return B, M
 
