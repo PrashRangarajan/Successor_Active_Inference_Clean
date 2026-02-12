@@ -659,14 +659,15 @@ def plot_phase1_baseline(args, data_dir, save_dir):
     plt.close()
     print(f"  Saved {save_dir}/{fname}")
 
-def _draw_grid_on_ax(ax, grid_size, walls, init_loc, goal_A, goal_B, title):
+def _draw_grid_on_ax(ax, grid_size, walls, init_loc, goal_A, goal_B, title,
+                     goal_C=None):
     """Draw a gridworld layout diagram on a matplotlib axes."""
     grid = np.ones((grid_size, grid_size, 3))  # white background
     for w in walls:
         grid[w[0], w[1]] = [0.25, 0.25, 0.25]  # dark gray walls
 
-    # Transpose so x=column, y=row with origin at bottom-left
-    ax.imshow(grid.transpose(1, 0, 2), origin='lower', aspect='equal')
+    # Transpose so x=column, y=row with origin at top-left (matching video convention)
+    ax.imshow(grid.transpose(1, 0, 2), origin='upper', aspect='equal')
 
     # Draw grid lines
     for i in range(grid_size + 1):
@@ -683,9 +684,13 @@ def _draw_grid_on_ax(ax, grid_size, walls, init_loc, goal_A, goal_B, title):
     ax.plot(goal_B[0], goal_B[1], '^', color='dodgerblue',
             markersize=14, markeredgecolor='black', markeredgewidth=1.5,
             label='Goal B', zorder=5)
+    if goal_C is not None:
+        ax.plot(goal_C[0], goal_C[1], 'D', color='darkorange',
+                markersize=14, markeredgecolor='black', markeredgewidth=1.5,
+                label='Goal C', zorder=5)
 
     ax.set_xlim(-0.5, grid_size - 0.5)
-    ax.set_ylim(-0.5, grid_size - 0.5)
+    ax.set_ylim(grid_size - 0.5, -0.5)  # invert y so (0,0) is top-left
     ax.set_xticks([])
     ax.set_yticks([])
     ax.set_title(title, fontsize=16, fontweight='bold')
@@ -701,10 +706,12 @@ def plot_grid_layout(args, save_dir):
     init_loc = tuple(args.init_loc)
     goal_A = tuple(args.goal_A)
     goal_B = tuple(args.goal_B)
+    goal_C = tuple(args.goal_C) if hasattr(args, 'goal_C') and args.goal_C is not None else None
 
     _draw_grid_on_ax(ax, args.grid_size, walls, init_loc, goal_A, goal_B,
-                     f"{layout_name.capitalize()} Layout")
-    ax.legend(fontsize=12, loc='upper right')
+                     f"{layout_name.capitalize()} Layout", goal_C=goal_C)
+    ax.legend(fontsize=12, loc='upper center', bbox_to_anchor=(0.5, -0.02),
+              ncol=4, frameon=True)
     fig.tight_layout()
 
     fname = f"grid_layout_{layout_name}.png"
@@ -776,8 +783,10 @@ def plot_combined_figure(data_base_dir, save_dir, replay_tag="replay"):
         init_loc = tuple(a["init_loc"])
         goal_A = tuple(a["goal_A"])
         goal_B = tuple(a["goal_B"])
+        goal_C = tuple(a["goal_C"]) if "goal_C" in a and a["goal_C"] is not None else None
         _draw_grid_on_ax(axes[0, ci], a["grid_size"], walls,
-                         init_loc, goal_A, goal_B, layout_name.capitalize())
+                         init_loc, goal_A, goal_B, layout_name.capitalize(),
+                         goal_C=goal_C)
 
     # Add a legend for the grid row markers (from first column only)
     handles, labels = axes[0, 0].get_legend_handles_labels()
@@ -1097,7 +1106,12 @@ def plot_multiphase_timeline(data_dir, save_dir, args):
         qs_sem = np.std(qs_all, axis=0) / np.sqrt(n_runs)
 
     def _decorate_multiphase_ax(ax):
-        """Add phase shading, goal-switch lines, and labels."""
+        """Add phase shading, goal-switch lines, and labels with goal markers."""
+        y_lo, y_hi = -40, 120
+        ax.set_ylim(y_lo, y_hi)
+        # Goal marker styles matching _draw_grid_on_ax
+        goal_markers = ['s', '^', 'D']       # square, triangle, diamond
+        goal_colors = ['red', 'dodgerblue', 'darkorange']
         phase_colors = ['#e8e8e8', '#f5f5f5', '#e8e8e8']
         for p in range(n_phases):
             x_start = p * phase_budget
@@ -1107,21 +1121,22 @@ def plot_multiphase_timeline(data_dir, save_dir, args):
             if p > 0:
                 ax.axvline(x_start, color='black', linewidth=2, linestyle='--',
                            alpha=0.7, zorder=4)
+                # "Switch to Goal X" with marker inline via annotate
+                switch_x = x_start + phase_budget * 0.05
+                ax.plot(switch_x, y_hi - 8, goal_markers[p],
+                        color=goal_colors[p], markersize=11,
+                        markeredgecolor='black', markeredgewidth=1.5,
+                        zorder=6, clip_on=False)
                 ax.annotate(f'Switch to\nGoal {goal_labels[p]}',
-                            xy=(x_start, 100),
-                            xytext=(x_start + phase_budget * 0.05, 105),
+                            xy=(switch_x, y_hi - 8),
+                            xytext=(14, 0), textcoords='offset points',
                             fontsize=13, fontweight='bold', color='black',
-                            ha='left', va='bottom')
-            mid_x = x_start + phase_budget / 2
-            ax.text(mid_x, -35, f'Goal {goal_labels[p]}\n{tuple(goals[p])}',
-                    ha='center', va='top', fontsize=12, style='italic',
-                    color='#555555')
+                            ha='left', va='center')
 
         ax.set_xlabel('Cumulative Training Episodes', fontsize=20)
         ax.set_ylabel('Total Reward', fontsize=20)
         ax.tick_params(axis='both', labelsize=16)
         ax.set_xlim(0, n_phases * phase_budget)
-        ax.set_ylim(-40, 115)
 
     title = f'Multi-Phase Goal Revaluation — {layout_name.capitalize()}' if layout_name else \
             'Multi-Phase Goal Revaluation'
@@ -1129,20 +1144,19 @@ def plot_multiphase_timeline(data_dir, save_dir, args):
     # --- Plot 1: SR + Q transfer only ---
     fig, ax = plt.subplots(figsize=(16, 8))
     ax.plot(x_all, sr_hier_mean, '-', color='C0', linewidth=2.5,
-            label='SR Hierarchy', zorder=3)
+            label='Hierarchy', zorder=3)
     ax.fill_between(x_all, sr_hier_mean - sr_hier_sem, sr_hier_mean + sr_hier_sem,
                     color='C0', alpha=0.15)
     ax.plot(x_all, sr_flat_mean, '--', color='C1', linewidth=2.5,
-            label='SR Flat', zorder=3)
+            label='Flat', zorder=3)
     ax.fill_between(x_all, sr_flat_mean - sr_flat_sem, sr_flat_mean + sr_flat_sem,
                     color='C1', alpha=0.15)
     ax.plot(x_all, q_mean, 's-', color='C2', linewidth=2, markersize=6,
-            label='Q-Learning (transfer)', zorder=3)
+            label='Q-Learning', zorder=3)
     ax.fill_between(x_all, q_mean - q_sem, q_mean + q_sem,
                     color='C2', alpha=0.2)
     _decorate_multiphase_ax(ax)
-    ax.legend(fontsize=16, loc='lower right')
-    ax.set_title(title, fontsize=22, fontweight='bold')
+    ax.legend(fontsize=16, loc='center right')
     fig.tight_layout()
     fname = f"goal_revaluation_multiphase_{layout_name}.png" if layout_name else \
             "goal_revaluation_multiphase.png"
@@ -1154,24 +1168,23 @@ def plot_multiphase_timeline(data_dir, save_dir, args):
     if reward_q_scratch is not None:
         fig, ax = plt.subplots(figsize=(16, 8))
         ax.plot(x_all, sr_hier_mean, '-', color='C0', linewidth=2.5,
-                label='SR Hierarchy', zorder=3)
+                label='Hierarchy', zorder=3)
         ax.fill_between(x_all, sr_hier_mean - sr_hier_sem, sr_hier_mean + sr_hier_sem,
                         color='C0', alpha=0.15)
         ax.plot(x_all, sr_flat_mean, '--', color='C1', linewidth=2.5,
-                label='SR Flat', zorder=3)
+                label='Flat', zorder=3)
         ax.fill_between(x_all, sr_flat_mean - sr_flat_sem, sr_flat_mean + sr_flat_sem,
                         color='C1', alpha=0.15)
         ax.plot(x_all, q_mean, 's-', color='C2', linewidth=2, markersize=6,
-                label='Q-Learning (transfer)', zorder=3)
+                label='Q-Learning', zorder=3)
         ax.fill_between(x_all, q_mean - q_sem, q_mean + q_sem,
                         color='C2', alpha=0.2)
         ax.plot(x_all, qs_mean, 'D-', color='C3', linewidth=2, markersize=5,
-                label='Q-Learning (from scratch)', zorder=3)
+                label='Q-Learning (scratch)', zorder=3)
         ax.fill_between(x_all, qs_mean - qs_sem, qs_mean + qs_sem,
                         color='C3', alpha=0.2)
         _decorate_multiphase_ax(ax)
-        ax.legend(fontsize=16, loc='lower right')
-        ax.set_title(title, fontsize=22, fontweight='bold')
+        ax.legend(fontsize=16, loc='center right')
         fig.tight_layout()
         fname = f"goal_revaluation_multiphase_all_{layout_name}.png" if layout_name else \
                 "goal_revaluation_multiphase_all.png"

@@ -1,10 +1,13 @@
 """Run the legacy experiment_hierarchy_flat.py with serpentine config."""
+import sys
+import os
+sys.path.insert(0, os.path.dirname(__file__))
+
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 import argparse
 import json
-import os
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
