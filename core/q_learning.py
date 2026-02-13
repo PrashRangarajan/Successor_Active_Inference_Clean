@@ -115,13 +115,13 @@ class QLearningAgent:
         Args:
             num_episodes: Number of training episodes to run
         """
-        # Use grid_size-based step limit if available, otherwise default
-        if hasattr(self.adapter, 'grid_size'):
-            max_steps = 5 * self.adapter.grid_size
+        # Use grid_size-based step limit for discrete envs, otherwise default
+        if not self.adapter.is_continuous:
+            max_steps = 5 * getattr(self.adapter, 'grid_size', 40)
         else:
             max_steps = 200
 
-        has_diverse_starts = hasattr(self.adapter, 'sample_random_state')
+        has_diverse_starts = self.adapter.is_continuous
 
         for ep in range(num_episodes):
             if (ep + 1) % 100 == 0:
@@ -199,7 +199,7 @@ class QLearningAgent:
             # Handle being stuck (wall) — try other actions
             # Only for discrete environments where same-state means hitting a wall.
             # For continuous environments, same bin doesn't mean stuck.
-            if next_state_idx == state_idx and hasattr(self.adapter, 'grid_size'):
+            if next_state_idx == state_idx and not self.adapter.is_continuous:
                 native_state = self.adapter.get_state_for_reset()
                 moved = False
                 for alt_action in range(self.n_actions):

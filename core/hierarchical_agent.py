@@ -6,7 +6,7 @@ hierarchical planning) is environment-agnostic.
 """
 
 import random
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -116,7 +116,7 @@ class HierarchicalSRAgent(VisualizationMixin):
         self.n_replay_epochs = n_replay_epochs
         self.replay_buffer_size = replay_buffer_size
         self.replay_mode = replay_mode
-        self.replay_buffer = []  # list of episodes; each episode is a list of (s, a, s', r, done)
+        self.replay_buffer = deque()  # deque of episodes; each episode is a list of (s, a, s', r, done)
         self._replay_buffer_total = 0
 
         # Policy caching
@@ -143,12 +143,10 @@ class HierarchicalSRAgent(VisualizationMixin):
             self._effective_train_smooth = self.train_smooth_steps
         else:
             # Auto-detect: 10 for continuous environments, 1 for discrete
-            is_continuous = not hasattr(self.adapter, 'grid_size')
-            self._effective_train_smooth = 10 if is_continuous else 1
+            self._effective_train_smooth = 10 if self.adapter.is_continuous else 1
 
         # Set learning mode on adapter (for POMDP adapters that support it)
-        if hasattr(self.adapter, 'set_learning_mode'):
-            self.adapter.set_learning_mode(True)
+        self.adapter.set_learning_mode(True)
 
         if flat_only:
             # Flat mode: ALL episodes go to SR learning (no adjacency overhead).
@@ -197,8 +195,7 @@ class HierarchicalSRAgent(VisualizationMixin):
             self.B_macro, self.M_macro = self._compute_macro_matrices()
 
         # Exit learning mode
-        if hasattr(self.adapter, 'set_learning_mode'):
-            self.adapter.set_learning_mode(False)
+        self.adapter.set_learning_mode(False)
 
     def learn_environment_incremental(self, delta_episodes: int, flat_only: bool = False):
         """Incremental learning: add more episodes of experience to existing B/M.
@@ -223,11 +220,9 @@ class HierarchicalSRAgent(VisualizationMixin):
         if self.train_smooth_steps is not None:
             self._effective_train_smooth = self.train_smooth_steps
         else:
-            is_continuous = not hasattr(self.adapter, 'grid_size')
-            self._effective_train_smooth = 10 if is_continuous else 1
+            self._effective_train_smooth = 10 if self.adapter.is_continuous else 1
 
-        if hasattr(self.adapter, 'set_learning_mode'):
-            self.adapter.set_learning_mode(True)
+        self.adapter.set_learning_mode(True)
 
         if flat_only:
             # Flat mode: ALL episodes go to SR (no adjacency overhead)
@@ -267,8 +262,7 @@ class HierarchicalSRAgent(VisualizationMixin):
             # Recompute macro matrices
             self.B_macro, self.M_macro = self._compute_macro_matrices()
 
-        if hasattr(self.adapter, 'set_learning_mode'):
-            self.adapter.set_learning_mode(False)
+        self.adapter.set_learning_mode(False)
 
     def set_goal(self, goal_spec: Any, reward: float = 100.0, default_cost: float = -0.1):
         """Set a sparse goal for the agent.
@@ -385,7 +379,10 @@ class HierarchicalSRAgent(VisualizationMixin):
         # from state X → state Y is valid physics regardless of whether Gym
         # considers the episode "done".  Episodes that start from random high-
         # energy states would otherwise terminate immediately, wasting samples.
-        has_diverse_starts = hasattr(self.adapter, 'sample_random_state')
+        # Continuous adapters provide sample_random_state() and step_with_info()
+        # for diverse-start exploration and termination signals.
+        has_diverse_starts = self.adapter.is_continuous
+        has_step_info = self.adapter.is_continuous
 
         for ep in range(num_episodes):
             if (ep + 1) % 100 == 0:
@@ -407,7 +404,7 @@ class HierarchicalSRAgent(VisualizationMixin):
 
                 # For continuous envs, take multiple steps to let state actually change
                 for _ in range(smooth_steps):
-                    if hasattr(self.adapter, 'step_with_info'):
+                    if has_step_info:
                         _, _, terminated, truncated, _ = self.adapter.step_with_info(action)
                         if has_diverse_starts and (terminated or truncated):
                             # Record this final transition, then re-seed
@@ -569,7 +566,7 @@ class HierarchicalSRAgent(VisualizationMixin):
 
         # Evict oldest episodes when buffer exceeds capacity
         while self._replay_buffer_total > self.replay_buffer_size and self.replay_buffer:
-            evicted = self.replay_buffer.pop(0)
+            evicted = self.replay_buffer.popleft()
             self._replay_buffer_total -= len(evicted)
 
     def _replay_sr_updates(self, M: np.ndarray, n_epochs: int, lr: float):
@@ -629,12 +626,7 @@ class HierarchicalSRAgent(VisualizationMixin):
         valid_indices = np.where(valid_mask)[0]
 
         # Flatten successor matrix for clustering
-        if hasattr(self.adapter, 'flatten_successor_for_clustering'):
-            M_flat = self.adapter.flatten_successor_for_clustering(self.M)
-        else:
-            M_flat = self.M if self.M.ndim == 2 else self.M.reshape(
-                self.adapter.n_states, self.adapter.n_states
-            )
+        M_flat = self.adapter.flatten_successor_for_clustering(self.M)
 
         # Extract valid states only
         if len(valid_indices) < self.adapter.n_states:
@@ -648,8 +640,7 @@ class HierarchicalSRAgent(VisualizationMixin):
 
         # Let the adapter provide a custom affinity (e.g. cylindrical
         # distance blended with M for periodic state spaces like Pendulum).
-        if hasattr(self.adapter, 'get_clustering_affinity'):
-            M_symmetric = self.adapter.get_clustering_affinity(M_symmetric)
+        M_symmetric = self.adapter.get_clustering_affinity(M_symmetric)
 
         # Compute spectral embedding for visualization
         try:
@@ -745,7 +736,7 @@ class HierarchicalSRAgent(VisualizationMixin):
         bottleneck_states = defaultdict(set)
 
         episode_length = 50
-        has_diverse_starts = hasattr(self.adapter, 'sample_random_state')
+        has_diverse_starts = self.adapter.is_continuous
 
         for ep in range(num_episodes):
             if has_diverse_starts:
@@ -858,8 +849,9 @@ class HierarchicalSRAgent(VisualizationMixin):
 
         s_before = self.adapter.get_current_state_index()
         for i in range(smooth_steps):
-            if hasattr(self.adapter, 'step_with_info'):
-                _, _, terminated, truncated, _ = self.adapter.step_with_info(action)
+            step_result = self.adapter.step_with_info(action)
+            if step_result is not None:
+                _, _, terminated, truncated, _ = step_result
                 if terminated or truncated:
                     return i + 1
             else:

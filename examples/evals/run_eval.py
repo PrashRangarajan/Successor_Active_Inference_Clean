@@ -37,43 +37,11 @@ from copy import deepcopy
 import numpy as np
 
 from core import HierarchicalSRAgent
+from core.eval_utils import relative_stability
 from core.q_learning import QLearningAgent
 from environments.gridworld import GridworldAdapter, get_layout, AVAILABLE_LAYOUTS
 from examples.configs import GRIDWORLD
 from unified_env import StandardGridworld as SR_Gridworld
-
-# ==================== Utilities ====================
-
-def relative_stability(returns, Ke=100, smooth_window=1, eps=1e-8):
-    """Relative Stability metric (lower is better).
-
-    Computes mean absolute relative deviation from the best return within the
-    final window.
-
-    Args:
-        returns: 1D sequence of evaluation returns over training
-        Ke: Window size from the end (clipped to len(returns))
-        smooth_window: If >1, apply moving average before computing deviations
-        eps: Small constant for numerical stability
-    """
-    r = np.asarray(returns, dtype=float).reshape(-1)
-    if r.size == 0:
-        return np.nan
-    Ke = int(min(max(1, Ke), r.size))
-    w = r[-Ke:]
-
-    if smooth_window is not None and int(smooth_window) > 1 and w.size >= int(
-        smooth_window
-    ):
-        k = int(smooth_window)
-        kernel = np.ones(k, dtype=float) / k
-        w_smooth = np.convolve(w, kernel, mode="same")
-    else:
-        w_smooth = w
-
-    best = np.max(w)
-    denom = np.abs(best) + eps
-    return float(np.mean(np.abs((w_smooth - best) / denom)))
 
 # ==================== Agent Factories ====================
 
