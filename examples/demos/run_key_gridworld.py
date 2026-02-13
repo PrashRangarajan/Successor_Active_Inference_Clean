@@ -131,5 +131,12 @@ def run_key_gridworld_example():
     agent.visualize_policy(save_dir="figures/key_gridworld/macro_action_network")
     print("  Saved policy visualizations to figures/key_gridworld/macro_action_network/")
 
+    # Composite figure (grid layout + value function + clusters + spectral embedding)
+    agent.visualize_key_gridworld_composite(
+        save_path="figures/key_gridworld/key_gridworld_composite.png",
+        init_loc=init_loc, goal_loc=goal_loc, key_loc=key_loc,
+    )
+    print("  Saved composite figure to figures/key_gridworld/key_gridworld_composite.png")
+
 if __name__ == '__main__':
     run_key_gridworld_example()

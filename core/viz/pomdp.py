@@ -25,6 +25,12 @@ class POMDPVizMixin(object):
     def visualize_value_function(self, save_path: str = None):
         """Visualize the value function on the grid.
 
+        For augmented state spaces (e.g., key gridworld) this produces two
+        side-by-side heatmaps — one per augment value ("Before picking up key"
+        / "After picking up key").
+
+        For standard state spaces, a single heatmap is shown.
+
         Args:
             save_path: Path to save the figure (e.g. 'figures/gridworld/value_function.png')
         """
@@ -41,34 +47,86 @@ class POMDPVizMixin(object):
             return
 
         grid_size = self.adapter.grid_size
+        n_base = grid_size ** 2
         V = self.adapter.multiply_M_C(self.M, self.C)
 
-        # Handle augmented state space - take max over key states
-        if V.shape[0] != grid_size ** 2:
-            # Probably augmented - reshape and take max
-            n_base = grid_size ** 2
-            if V.shape[0] == 2 * n_base:
-                V = np.maximum(V[:n_base], V[n_base:])
+        # Detect augmented state space
+        is_augmented = V.shape[0] != n_base and V.shape[0] == 2 * n_base
 
-        V_grid = V.reshape(grid_size, grid_size).T
+        # Get wall mask for the base grid
+        wall_mask_base = np.zeros(n_base, dtype=bool)
+        if hasattr(self.adapter, 'get_wall_indices'):
+            for wi in self.adapter.get_wall_indices():
+                # For augmented envs, wall indices cover both key states;
+                # map back to base location index.
+                if is_augmented:
+                    base_idx, _ = self.adapter.state_space.index_to_state(wi)
+                    wall_mask_base[base_idx] = True
+                else:
+                    wall_mask_base[wi] = True
 
-        plt.figure(figsize=(10, 8))
-        plt.imshow(V_grid, cmap='viridis')
-        plt.colorbar(label='Value')
-        plt.title('Value Function V = M @ C', fontsize=16)
-        plt.xticks(np.arange(grid_size))
-        plt.yticks(np.arange(grid_size))
+        if is_augmented:
+            # Split into per-augment-value panels
+            V_no_key = V[:n_base].copy()
+            V_has_key = V[n_base:].copy()
 
-        # Mark goal
-        if self.goal_states:
-            for gs in self.goal_states:
-                loc = self.adapter.render_state(gs)
-                plt.scatter(loc[0], loc[1], color='red', s=200, marker='*',
-                           label='Goal' if gs == self.goal_states[0] else '')
+            # Mask walls
+            V_no_key_grid = np.ma.masked_where(
+                wall_mask_base.reshape(grid_size, grid_size).T,
+                V_no_key.reshape(grid_size, grid_size).T,
+            )
+            V_has_key_grid = np.ma.masked_where(
+                wall_mask_base.reshape(grid_size, grid_size).T,
+                V_has_key.reshape(grid_size, grid_size).T,
+            )
 
-        plt.legend()
-        plt.savefig(save_path, bbox_inches='tight')
-        plt.close()
+            vmin = min(V_no_key_grid.min(), V_has_key_grid.min())
+            vmax = max(V_no_key_grid.max(), V_has_key_grid.max())
+
+            fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+            fig.suptitle('Value Function V = M @ C', fontsize=16)
+
+            for ax, V_grid, title in [
+                (axes[0], V_no_key_grid, 'Before picking up key'),
+                (axes[1], V_has_key_grid, 'After picking up key'),
+            ]:
+                ax.set_facecolor('white')
+                im = ax.imshow(V_grid, cmap='copper', vmin=vmin, vmax=vmax)
+                ax.set_title(title, fontsize=14)
+                ax.set_xticks(np.arange(grid_size))
+                ax.set_yticks(np.arange(grid_size))
+
+            fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.8, label='Value')
+
+            plt.savefig(save_path, bbox_inches='tight')
+            plt.close()
+        else:
+            # Standard (non-augmented) state space
+            V_grid = np.ma.masked_where(
+                wall_mask_base.reshape(grid_size, grid_size).T,
+                V.reshape(grid_size, grid_size).T,
+            )
+
+            plt.figure(figsize=(10, 8))
+            ax = plt.gca()
+            ax.set_facecolor('white')
+            plt.imshow(V_grid, cmap='viridis')
+            plt.colorbar(label='Value')
+            plt.title('Value Function V = M @ C', fontsize=16)
+            plt.xticks(np.arange(grid_size))
+            plt.yticks(np.arange(grid_size))
+
+            # Mark goal
+            if self.goal_states:
+                for gs in self.goal_states:
+                    loc = self.adapter.render_state(gs)
+                    plt.scatter(loc[0], loc[1], color='red', s=200, marker='*',
+                               label='Goal' if gs == self.goal_states[0] else '')
+
+            plt.legend()
+            plt.savefig(save_path, bbox_inches='tight')
+            plt.close()
+
         print(f"Value function saved to {save_path}")
 
     # ==================== POMDP Visualization ====================

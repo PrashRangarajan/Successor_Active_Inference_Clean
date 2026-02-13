@@ -8,7 +8,9 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from matplotlib.patches import Ellipse
 from matplotlib.colors import LogNorm
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from typing import Optional, List
 
 
@@ -354,6 +356,7 @@ class MatrixVizMixin(object):
             pass  # Already done above
         elif self.spectral_positions is not None:
             self._plot_spectral_embedding_augmented(save_dir)
+            self._plot_spectral_embedding_with_ellipses(save_dir)
 
     def _plot_spectral_embedding(self, save_dir: str, colours: np.ndarray):
         """Plot spectral embedding of states."""
@@ -379,6 +382,86 @@ class MatrixVizMixin(object):
         plt.legend()
         plt.title('Micro States Spectral Embedding (Augmented)')
         plt.savefig(f'{save_dir}/macro_state_viz.png', bbox_inches='tight')
+        plt.close()
+
+    def _plot_spectral_embedding_with_ellipses(self, save_dir: str):
+        """Plot spectral embedding with fitted 2σ covariance ellipses per cluster.
+
+        Produces a scatter plot colored by cluster with fitted Gaussian
+        ellipses overlaid and an inset thumbnail showing the cluster map
+        on the grid.  Saved alongside the existing scatter as a separate file.
+        """
+        if self.spectral_positions is None:
+            return
+
+        colours = plt.cm.gist_heat(np.linspace(0, 0.8, self.n_clusters))
+        fig, ax = plt.subplots(figsize=(10, 8))
+
+        # Scatter points by cluster
+        for i, states in enumerate(self.macro_state_list):
+            if len(states) == 0:
+                continue
+            positions = self.spectral_positions[states]
+            ax.scatter(positions[:, 0], positions[:, 1],
+                       label=f'Cluster {i}', color=colours[i], s=60,
+                       alpha=0.7, zorder=3)
+
+            # Fit 2σ covariance ellipse
+            if len(positions) >= 3:
+                mean = positions.mean(axis=0)
+                cov = np.cov(positions, rowvar=False)
+                # Eigendecomposition for ellipse orientation and axes
+                eigvals, eigvecs = np.linalg.eigh(cov)
+                # Ensure positive eigenvalues (numerical safety)
+                eigvals = np.maximum(eigvals, 1e-10)
+                # Angle from first eigenvector
+                angle = np.degrees(np.arctan2(eigvecs[1, 0], eigvecs[0, 0]))
+                # 2-sigma width and height
+                width = 2 * 2 * np.sqrt(eigvals[0])
+                height = 2 * 2 * np.sqrt(eigvals[1])
+                ell = Ellipse(xy=mean, width=width, height=height,
+                              angle=angle, facecolor=colours[i],
+                              edgecolor='black', linewidth=1.5,
+                              alpha=0.2, zorder=2)
+                ax.add_patch(ell)
+
+        ax.legend(fontsize=9, loc='upper right')
+        ax.set_title('Spectral Embedding with Cluster Ellipses', fontsize=14)
+        ax.set_xlabel('Component 1')
+        ax.set_ylabel('Component 2')
+
+        # Inset: cluster map thumbnail (if grid-based)
+        if hasattr(self.adapter, 'grid_size'):
+            grid_size = self.adapter.grid_size
+            n_states = self.adapter.n_states
+            base_n_states = grid_size * grid_size
+            is_augmented = n_states != base_n_states
+
+            inset = inset_axes(ax, width="25%", height="25%", loc='lower right',
+                               borderpad=1.5)
+
+            if is_augmented:
+                # Show has_key=0 panel as thumbnail
+                aug_labels = np.ones(base_n_states) * self.n_clusters
+                for micro_idx, macro_idx in self.micro_to_macro.items():
+                    state = self.adapter.state_space.index_to_state(micro_idx)
+                    if len(state) == 2:
+                        base_idx, aug_idx = state
+                        if aug_idx == 0:
+                            aug_labels[base_idx] = macro_idx
+                labels_grid = aug_labels.reshape(grid_size, grid_size).T
+            else:
+                labels_arr = np.ones(n_states) * self.n_clusters
+                for micro_idx, macro_idx in self.micro_to_macro.items():
+                    labels_arr[micro_idx] = macro_idx
+                labels_grid = labels_arr.reshape(grid_size, grid_size).T
+
+            inset.imshow(labels_grid, cmap='gist_heat')
+            inset.set_xticks([])
+            inset.set_yticks([])
+            inset.set_title('Clusters', fontsize=8)
+
+        plt.savefig(f'{save_dir}/macro_state_viz_ellipses.png', bbox_inches='tight')
         plt.close()
 
     def _visualize_clusters_2d_binned(self, save_dir: str):
@@ -469,3 +552,223 @@ class MatrixVizMixin(object):
         if self.spectral_positions is not None:
             colours_arr = np.array(colours[:n_legend])
             self._plot_spectral_embedding(save_dir, colours_arr)
+
+    # ==================== Composite Key Gridworld Figure ====================
+
+    def visualize_key_gridworld_composite(self, save_path: str,
+                                           init_loc: tuple, goal_loc: tuple,
+                                           key_loc: tuple):
+        """Generate a 2×2 composite figure for the Key Gridworld.
+
+        Panels:
+            (a) Grid layout — Agent / Key / Goal / walls
+            (b) Split value function — heatmaps per key state
+            (c) Split cluster maps — heatmaps per key state
+            (d) Spectral embedding with 2σ ellipses + inset
+
+        Args:
+            save_path: Where to save the composite figure.
+            init_loc: (x, y) agent start.
+            goal_loc: (x, y) goal position.
+            key_loc: (x, y) key position.
+        """
+        from matplotlib import colors as mcolors
+
+        if not hasattr(self.adapter, 'grid_size'):
+            print("Composite figure requires grid-based key gridworld adapter")
+            return
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+        grid_size = self.adapter.grid_size
+        n_base = grid_size ** 2
+        n_states = self.adapter.n_states
+
+        fig, axes = plt.subplots(2, 2, figsize=(14, 12))
+
+        # ---- (a) Grid layout ----
+        ax_a = axes[0, 0]
+        grid = np.zeros((grid_size, grid_size))
+        walls = self.adapter.env.get_walls() if hasattr(self.adapter.env, 'get_walls') else []
+        if len(walls) > 0:
+            wall_idx = tuple(np.array(walls).T)[::-1]
+            grid[wall_idx] = 1
+
+        kx, ky = key_loc
+        grid[ky, kx] = 0.75
+        sx, sy = init_loc
+        grid[sy, sx] = 0.25
+        gx, gy = goal_loc
+        grid[gy, gx] = 0.5
+
+        cmap_grid = mcolors.ListedColormap(['black', 'yellow', 'purple', 'orange', 'white'])
+        ax_a.imshow(grid, aspect='equal', cmap=cmap_grid)
+        ax_a.text(kx, ky, 'Key', fontsize=11, weight='bold', ha='center', va='center', color='k')
+        ax_a.text(sx, sy, 'Agent', fontsize=11, weight='bold', ha='center', va='center', color='k')
+        ax_a.text(gx, gy, 'Goal', fontsize=11, weight='bold', ha='center', va='center', color='w')
+        ax_a.set_xticks(np.arange(grid_size))
+        ax_a.set_yticks(np.arange(grid_size))
+        ax_a.set_xticks(np.arange(-0.5, grid_size, 1), minor=True)
+        ax_a.set_yticks(np.arange(-0.5, grid_size, 1), minor=True)
+        ax_a.grid(which='minor', color='w', linestyle='-', linewidth=2)
+        ax_a.tick_params(which='minor', bottom=False, left=False)
+        ax_a.set_title('(a) Grid Layout', fontsize=14)
+
+        # ---- (b) Split value function ----
+        ax_b = axes[0, 1]
+        if self.M is not None and self.C is not None:
+            V = self.adapter.multiply_M_C(self.M, self.C)
+            is_augmented_v = V.shape[0] == 2 * n_base
+
+            wall_mask = np.zeros(n_base, dtype=bool)
+            for wi in self.adapter.get_wall_indices():
+                if is_augmented_v:
+                    base_idx, _ = self.adapter.state_space.index_to_state(wi)
+                    wall_mask[base_idx] = True
+                else:
+                    wall_mask[wi] = True
+
+            if is_augmented_v:
+                V_no = V[:n_base].copy()
+                V_has = V[n_base:].copy()
+                wmask_grid = wall_mask.reshape(grid_size, grid_size).T
+
+                V_no_grid = np.ma.masked_where(wmask_grid, V_no.reshape(grid_size, grid_size).T)
+                V_has_grid = np.ma.masked_where(wmask_grid, V_has.reshape(grid_size, grid_size).T)
+
+                vmin = min(V_no_grid.min(), V_has_grid.min())
+                vmax = max(V_no_grid.max(), V_has_grid.max())
+
+                # Split the axis into two sub-axes
+                ax_b.set_visible(False)
+                gs_inner = fig.add_gridspec(2, 4, hspace=0.35, wspace=0.4)
+                ax_b1 = fig.add_subplot(gs_inner[0, 2])
+                ax_b2 = fig.add_subplot(gs_inner[0, 3])
+
+                ax_b1.set_facecolor('white')
+                ax_b1.imshow(V_no_grid, cmap='copper', vmin=vmin, vmax=vmax)
+                ax_b1.set_title('No Key', fontsize=11)
+                ax_b1.set_xticks(np.arange(grid_size))
+                ax_b1.set_yticks(np.arange(grid_size))
+
+                ax_b2.set_facecolor('white')
+                im_v = ax_b2.imshow(V_has_grid, cmap='copper', vmin=vmin, vmax=vmax)
+                ax_b2.set_title('Has Key', fontsize=11)
+                ax_b2.set_xticks(np.arange(grid_size))
+                ax_b2.set_yticks(np.arange(grid_size))
+
+                fig.colorbar(im_v, ax=[ax_b1, ax_b2], shrink=0.7, label='Value')
+                fig.text(0.73, 0.93, '(b) Value Function', ha='center', fontsize=14)
+            else:
+                V_grid = np.ma.masked_where(
+                    wall_mask.reshape(grid_size, grid_size).T,
+                    V.reshape(grid_size, grid_size).T,
+                )
+                ax_b.set_facecolor('white')
+                ax_b.imshow(V_grid, cmap='viridis')
+                ax_b.set_title('(b) Value Function', fontsize=14)
+                ax_b.set_xticks(np.arange(grid_size))
+                ax_b.set_yticks(np.arange(grid_size))
+        else:
+            ax_b.text(0.5, 0.5, 'No M/C', ha='center', va='center',
+                      transform=ax_b.transAxes, fontsize=14)
+            ax_b.set_title('(b) Value Function', fontsize=14)
+
+        # ---- (c) Split cluster maps ----
+        ax_c = axes[1, 0]
+        is_augmented_c = n_states != n_base
+        cluster_colours = plt.cm.gist_heat(np.linspace(0, 0.8, self.n_clusters))
+
+        if is_augmented_c:
+            ax_c.set_visible(False)
+            gs_inner_c = fig.add_gridspec(2, 4, hspace=0.35, wspace=0.4)
+            ax_c1 = fig.add_subplot(gs_inner_c[1, 0])
+            ax_c2 = fig.add_subplot(gs_inner_c[1, 1])
+
+            for aug_idx, (ax_sub, title) in enumerate(
+                    [(ax_c1, 'No Key'), (ax_c2, 'Has Key')]):
+                aug_labels = np.ones(n_base) * self.n_clusters
+                for micro_idx, macro_idx in self.micro_to_macro.items():
+                    state = self.adapter.state_space.index_to_state(micro_idx)
+                    if len(state) == 2:
+                        base_idx, st_aug = state
+                        if st_aug == aug_idx:
+                            aug_labels[base_idx] = macro_idx
+                labels_grid = aug_labels.reshape(grid_size, grid_size).T
+                ax_sub.imshow(labels_grid, cmap='gist_heat')
+                ax_sub.set_title(title, fontsize=11)
+                ax_sub.set_xticks(np.arange(grid_size))
+                ax_sub.set_yticks(np.arange(grid_size))
+
+            # Cluster legend
+            patches_c = [mpatches.Patch(color=cluster_colours[i], label=f'Cluster {i}')
+                         for i in range(self.n_clusters)]
+            fig.legend(handles=patches_c, loc='lower left',
+                       bbox_to_anchor=(0.02, 0.02), fontsize=8, ncol=2)
+            fig.text(0.27, 0.47, '(c) Macro State Clusters', ha='center', fontsize=14)
+        else:
+            labels_arr = np.ones(n_states) * self.n_clusters
+            for micro_idx, macro_idx in self.micro_to_macro.items():
+                labels_arr[micro_idx] = macro_idx
+            labels_grid = labels_arr.reshape(grid_size, grid_size).T
+            ax_c.imshow(labels_grid, cmap='gist_heat')
+            ax_c.set_title('(c) Macro State Clusters', fontsize=14)
+            ax_c.set_xticks(np.arange(grid_size))
+            ax_c.set_yticks(np.arange(grid_size))
+
+        # ---- (d) Spectral embedding with ellipses ----
+        ax_d = axes[1, 1]
+        if self.spectral_positions is not None:
+            for i, states in enumerate(self.macro_state_list):
+                if len(states) == 0:
+                    continue
+                positions = self.spectral_positions[states]
+                ax_d.scatter(positions[:, 0], positions[:, 1],
+                             label=f'Cluster {i}', color=cluster_colours[i],
+                             s=50, alpha=0.7, zorder=3)
+                # 2σ covariance ellipse
+                if len(positions) >= 3:
+                    mean = positions.mean(axis=0)
+                    cov = np.cov(positions, rowvar=False)
+                    eigvals, eigvecs = np.linalg.eigh(cov)
+                    eigvals = np.maximum(eigvals, 1e-10)
+                    angle = np.degrees(np.arctan2(eigvecs[1, 0], eigvecs[0, 0]))
+                    width = 2 * 2 * np.sqrt(eigvals[0])
+                    height = 2 * 2 * np.sqrt(eigvals[1])
+                    ell = Ellipse(xy=mean, width=width, height=height,
+                                  angle=angle, facecolor=cluster_colours[i],
+                                  edgecolor='black', linewidth=1.2,
+                                  alpha=0.2, zorder=2)
+                    ax_d.add_patch(ell)
+            ax_d.legend(fontsize=8, loc='upper right')
+
+            # Inset cluster thumbnail
+            if hasattr(self.adapter, 'grid_size'):
+                inset = inset_axes(ax_d, width="22%", height="22%", loc='lower right',
+                                   borderpad=1.0)
+                if is_augmented_c:
+                    aug_labels_in = np.ones(n_base) * self.n_clusters
+                    for micro_idx, macro_idx in self.micro_to_macro.items():
+                        state = self.adapter.state_space.index_to_state(micro_idx)
+                        if len(state) == 2:
+                            base_idx, aug_idx = state
+                            if aug_idx == 0:
+                                aug_labels_in[base_idx] = macro_idx
+                    inset.imshow(aug_labels_in.reshape(grid_size, grid_size).T, cmap='gist_heat')
+                else:
+                    inset.imshow(labels_grid, cmap='gist_heat')
+                inset.set_xticks([])
+                inset.set_yticks([])
+                inset.set_title('Clusters', fontsize=7)
+        else:
+            ax_d.text(0.5, 0.5, 'No spectral data', ha='center', va='center',
+                      transform=ax_d.transAxes, fontsize=14)
+        ax_d.set_title('(d) Spectral Embedding', fontsize=14)
+
+        fig.suptitle('Key Gridworld — Hierarchical SR Agent', fontsize=16, y=0.98)
+        try:
+            plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        except Exception:
+            pass  # Mixed gridspec axes may not be compatible with tight_layout
+        plt.savefig(save_path, bbox_inches='tight', dpi=150)
+        plt.close()
+        print(f"Composite figure saved to {save_path}")
