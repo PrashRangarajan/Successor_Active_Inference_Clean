@@ -26,8 +26,8 @@ class POMDPVizMixin(object):
         """Visualize the value function on the grid.
 
         For augmented state spaces (e.g., key gridworld) this produces two
-        side-by-side heatmaps — one per augment value ("Before picking up key"
-        / "After picking up key").
+        side-by-side heatmaps — one per augment value ("Without key"
+        / "With key").
 
         For standard state spaces, a single heatmap is shown.
 
@@ -84,11 +84,11 @@ class POMDPVizMixin(object):
             vmax = max(V_no_key_grid.max(), V_has_key_grid.max())
 
             fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-            fig.suptitle('Value Function V = M @ C', fontsize=16)
+            # fig.suptitle('Value Function V = M @ C', fontsize=16)
 
             for ax, V_grid, title in [
-                (axes[0], V_no_key_grid, 'Before picking up key'),
-                (axes[1], V_has_key_grid, 'After picking up key'),
+                (axes[0], V_no_key_grid, '✗ Without key'),
+                (axes[1], V_has_key_grid, '★ With key'),
             ]:
                 ax.set_facecolor('white')
                 im = ax.imshow(V_grid, cmap='copper', vmin=vmin, vmax=vmax)
@@ -112,7 +112,7 @@ class POMDPVizMixin(object):
             ax.set_facecolor('white')
             plt.imshow(V_grid, cmap='viridis')
             plt.colorbar(label='Value')
-            plt.title('Value Function V = M @ C', fontsize=16)
+            # plt.title('Value Function V = M @ C', fontsize=16)
             plt.xticks(np.arange(grid_size))
             plt.yticks(np.arange(grid_size))
 

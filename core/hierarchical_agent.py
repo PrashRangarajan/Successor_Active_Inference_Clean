@@ -1040,7 +1040,11 @@ class HierarchicalSRAgent(VisualizationMixin):
 
             # Check if we've changed macro state
             if s_idx in self.micro_to_macro:
-                if self.micro_to_macro[s_idx] == target_macro:
+                current_macro = self.micro_to_macro[s_idx]
+                if current_macro == target_macro:
+                    break
+                # Entered an unexpected cluster — replan at macro level
+                if current_macro != init_macro:
                     break
 
         return steps, reward

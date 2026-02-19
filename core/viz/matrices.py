@@ -5,11 +5,13 @@ successor matrices, and macro state cluster visualizations.
 """
 
 import os
+import warnings
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import matplotlib.patheffects as PathEffects
 from matplotlib.patches import Ellipse
-from matplotlib.colors import LogNorm
+from matplotlib.colors import LogNorm, ListedColormap, BoundaryNorm
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from typing import Optional, List
 
@@ -23,6 +25,24 @@ class MatrixVizMixin(object):
     - self.B_macro, self.M_macro: Macro-level matrices
     - self.macro_state_list, self.micro_to_macro: Clustering results
     """
+
+    # ==================== Colormap Helpers ====================
+
+    def _cluster_cmap_and_norm(self):
+        """Return a discrete (ListedColormap, BoundaryNorm) for cluster plots.
+
+        Maps cluster indices 0..n_clusters-1 to distinct colours drawn from
+        the ``gist_heat`` palette and reserves **white** for wall / invalid
+        cells (which carry the sentinel value ``n_clusters``).
+        """
+        base_colours = plt.cm.gist_heat(np.linspace(0, 0.8, self.n_clusters))
+        # Append white for the wall sentinel
+        all_colours = list(base_colours) + [(1, 1, 1, 1)]  # white for walls
+        cmap = ListedColormap(all_colours)
+        # Boundaries: [−0.5, 0.5, 1.5, …, n_clusters−0.5, n_clusters+0.5]
+        bounds = np.arange(-0.5, self.n_clusters + 1.5, 1)
+        norm = BoundaryNorm(bounds, cmap.N)
+        return cmap, norm
 
     # ==================== Matrix Visualization ====================
 
@@ -85,7 +105,7 @@ class MatrixVizMixin(object):
             return
 
         plt.figure(figsize=(10, 8))
-        plt.title(title, fontsize=20)
+        # plt.title(title, fontsize=20)
         plt.imshow(B_avg)
         plt.colorbar()
         plt.savefig(save_path, format="png", bbox_inches='tight')
@@ -103,7 +123,7 @@ class MatrixVizMixin(object):
         plt.figure(figsize=(10, 8))
         plt.imshow(M_flat, aspect='equal', cmap='cividis')
         plt.colorbar()
-        plt.title(title, fontsize=20)
+        # plt.title(title, fontsize=20)
         plt.savefig(save_path, format="png", bbox_inches='tight')
         plt.close()
 
@@ -142,9 +162,9 @@ class MatrixVizMixin(object):
             n_augment = M.shape[1]
 
             fig, axes = plt.subplots(n_augment, n_augment, figsize=(12, 10))
-            fig.suptitle(f'Successor Representation from ({origin_x},{origin_y})', fontsize=16)
+            # fig.suptitle(f'Successor Representation from ({origin_x},{origin_y})', fontsize=16)
 
-            aug_labels = ["No Key", "Has Key"] if n_augment == 2 else [f"Aug {i}" for i in range(n_augment)]
+            aug_labels = ["✗ Without key", "★ With key"] if n_augment == 2 else [f"Aug {i}" for i in range(n_augment)]
 
             # Find global max for consistent color scaling
             global_max = max(M[origin_state, i, :, j].max()
@@ -160,7 +180,7 @@ class MatrixVizMixin(object):
 
                     im = ax.imshow(M_slice, aspect='equal', cmap='copper',
                                    norm=LogNorm(vmin=0.01, vmax=global_max))
-                    ax.set_title(f'{aug_labels[origin_aug]} \u2192 {aug_labels[target_aug]}', fontsize=12)
+                    # ax.set_title(f'{aug_labels[origin_aug]} \u2192 {aug_labels[target_aug]}', fontsize=12)
                     ax.set_xticks(np.arange(grid_size))
                     ax.set_yticks(np.arange(grid_size))
 
@@ -181,7 +201,7 @@ class MatrixVizMixin(object):
             plt.imshow(M_orig, aspect='equal', cmap='copper',
                        norm=LogNorm(vmin=0.01, vmax=vmax))
             plt.colorbar()
-            plt.title(f'Successor Representation from ({origin_x},{origin_y})', fontsize=14)
+            # plt.title(f'Successor Representation from ({origin_x},{origin_y})', fontsize=14)
             plt.xticks(np.arange(grid_size), fontsize=12)
             plt.yticks(np.arange(grid_size), fontsize=12)
 
@@ -200,7 +220,7 @@ class MatrixVizMixin(object):
         # B_macro
         B_macro_avg = np.sum(self.B_macro, axis=2) / n_macro_actions
         plt.figure(figsize=(8, 6))
-        plt.title("Default Policy B Matrix (Macro)", fontsize=20)
+        # plt.title("Default Policy B Matrix (Macro)", fontsize=20)
         plt.imshow(B_macro_avg)
         plt.xticks(range(n_clusters), fontsize=12)
         plt.yticks(range(n_clusters), fontsize=12)
@@ -217,7 +237,7 @@ class MatrixVizMixin(object):
         plt.imshow(self.M_macro, aspect='equal', cmap='cividis')
         plt.xticks(range(n_clusters), fontsize=12)
         plt.yticks(range(n_clusters), fontsize=12)
-        plt.title(f"Successor Matrix M Macro ({learn_str})", fontsize=20)
+        # plt.title(f"Successor Matrix M Macro ({learn_str})", fontsize=20)
         for i in range(n_clusters):
             for j in range(n_clusters):
                 plt.text(j, i, f'{self.M_macro[i, j]:.2f}',
@@ -289,6 +309,7 @@ class MatrixVizMixin(object):
         if is_augmented:
             # For augmented state spaces, create separate grids for each augment value
             n_augment = n_states // base_n_states
+            cmap_d, norm_d = self._cluster_cmap_and_norm()
 
             fig, axes = plt.subplots(1, n_augment, figsize=(6 * n_augment, 6))
             if n_augment == 1:
@@ -308,8 +329,8 @@ class MatrixVizMixin(object):
                 labels_grid = aug_labels.reshape(grid_size, grid_size).T
 
                 ax = axes[aug_idx]
-                im = ax.imshow(labels_grid, cmap='gist_heat')
-                aug_label = "No Key" if aug_idx == 0 else "Has Key"
+                im = ax.imshow(labels_grid, cmap=cmap_d, norm=norm_d)
+                aug_label = "✗ Without key" if aug_idx == 0 else "★ With key"
                 ax.set_title(f"{aug_label}", fontsize=16)
                 ax.set_xticks(np.arange(grid_size))
                 ax.set_yticks(np.arange(grid_size))
@@ -319,11 +340,11 @@ class MatrixVizMixin(object):
 
             # Add legend
             colours = plt.cm.gist_heat(np.linspace(0, 0.8, self.n_clusters))
-            patches = [mpatches.Patch(color=colours[i], label=f'Cluster {i}')
+            patches = [mpatches.Patch(color=colours[i], label=f'{i}')
                        for i in range(self.n_clusters)]
             fig.legend(handles=patches, loc='center right', borderaxespad=0.5)
 
-            plt.suptitle("Macro State Clusters (Augmented State Space)", fontsize=20)
+            # plt.suptitle("Macro State Clusters (Augmented State Space)", fontsize=20)
             plt.tight_layout()
             plt.savefig(f"{save_dir}/Macro_s.png", format="png", bbox_inches='tight')
             plt.close()
@@ -338,7 +359,7 @@ class MatrixVizMixin(object):
             colours = im.cmap(im.norm(np.unique(labels_grid)))
             plt.xticks(np.arange(grid_size), fontsize=12)
             plt.yticks(np.arange(grid_size), fontsize=12)
-            plt.title("Macro State Clusters", fontsize=20)
+            # plt.title("Macro State Clusters", fontsize=20)
 
             n_colors = len(colours) - 1 if len(colours) > self.n_clusters else len(colours)
             patches = [mpatches.Patch(color=colours[i], label=f'{i}')
@@ -366,7 +387,7 @@ class MatrixVizMixin(object):
             plt.scatter(positions[:, 0], positions[:, 1],
                        label=f'{i}', color=colours[i], s=75)
         plt.legend()
-        plt.title('Micro States Spectral Embedding')
+        # plt.title('Micro States Spectral Embedding')
         plt.savefig(f'{save_dir}/macro_state_viz.png', bbox_inches='tight')
         plt.close()
 
@@ -378,9 +399,9 @@ class MatrixVizMixin(object):
             if len(states) > 0:
                 positions = self.spectral_positions[states]
                 plt.scatter(positions[:, 0], positions[:, 1],
-                           label=f'Cluster {i}', color=colours[i], s=75)
+                           label=f'{i}', color=colours[i], s=75)
         plt.legend()
-        plt.title('Micro States Spectral Embedding (Augmented)')
+        # plt.title('Micro States Spectral Embedding (Augmented)')
         plt.savefig(f'{save_dir}/macro_state_viz.png', bbox_inches='tight')
         plt.close()
 
@@ -403,7 +424,7 @@ class MatrixVizMixin(object):
                 continue
             positions = self.spectral_positions[states]
             ax.scatter(positions[:, 0], positions[:, 1],
-                       label=f'Cluster {i}', color=colours[i], s=60,
+                       label=f'{i}', color=colours[i], s=60,
                        alpha=0.7, zorder=3)
 
             # Fit 2σ covariance ellipse
@@ -426,7 +447,7 @@ class MatrixVizMixin(object):
                 ax.add_patch(ell)
 
         ax.legend(fontsize=9, loc='upper right')
-        ax.set_title('Spectral Embedding with Cluster Ellipses', fontsize=14)
+        # ax.set_title('Spectral Embedding with Cluster Ellipses', fontsize=14)
         ax.set_xlabel('Component 1')
         ax.set_ylabel('Component 2')
 
@@ -459,7 +480,7 @@ class MatrixVizMixin(object):
             inset.imshow(labels_grid, cmap='gist_heat')
             inset.set_xticks([])
             inset.set_yticks([])
-            inset.set_title('Clusters', fontsize=8)
+            # inset.set_title('Clusters', fontsize=8)
 
         plt.savefig(f'{save_dir}/macro_state_viz_ellipses.png', bbox_inches='tight')
         plt.close()
@@ -502,6 +523,16 @@ class MatrixVizMixin(object):
         if has_centers:
             centers0, centers1 = self.adapter.get_bin_centers()
 
+        # Use tab10 discrete colormap to match trajectory / macro action plots
+        tab_cmap = plt.get_cmap("tab10")
+        cluster_colors = [tab_cmap(i) for i in range(self.n_clusters)]
+        unassigned_color = (0.85, 0.85, 0.85, 1.0)  # light gray
+        all_colors = cluster_colors + [unassigned_color]
+        from matplotlib.colors import ListedColormap, BoundaryNorm
+        cmap = ListedColormap(all_colors)
+        bounds = np.arange(-0.5, self.n_clusters + 1.5, 1)
+        norm = BoundaryNorm(bounds, cmap.N)
+
         plt.figure()
         im = plt.imshow(
             labels_grid.T,
@@ -509,15 +540,13 @@ class MatrixVizMixin(object):
             origin='lower',
             extent=extent,
             interpolation='nearest',
+            cmap=cmap,
+            norm=norm,
         )
 
-        # Build legend from the colormap used by imshow
-        colours = im.cmap(im.norm(np.unique(labels_grid)))
-        n_actual = len(np.unique(labels_grid))
-        # Exclude unassigned label from the legend
-        n_legend = n_actual - 1 if self.n_clusters in labels else n_actual
-        patches = [mpatches.Patch(color=colours[i], label=f'{i}')
-                   for i in range(n_legend)]
+        # Build legend from tab10 colours (exclude unassigned)
+        patches = [mpatches.Patch(color=cluster_colors[i], label=f'{i}')
+                   for i in range(self.n_clusters)]
         plt.legend(handles=patches)
 
         # Custom tick labels showing physical bin centers (subsampled to avoid clutter)
@@ -543,14 +572,78 @@ class MatrixVizMixin(object):
 
         plt.xlabel(dim0_label, fontsize=12)
         plt.ylabel(dim1_label, fontsize=12)
-        plt.title("Macro state clusters", fontsize=20)
         plt.savefig(f"{save_dir}/Macro_s.png", format="png", bbox_inches='tight')
+
+        # ---- Overlay macro action arrows and save as separate figure ----
+        if has_centers and hasattr(self, 'adj_list') and self.adj_list:
+            # Compute cluster centroids in physical coordinates
+            centroids = {}
+            for c in range(self.n_clusters):
+                member_indices = [s for s, m in self.micro_to_macro.items() if m == c]
+                if not member_indices:
+                    continue
+                coords = np.array([self.adapter.state_space.index_to_state(s) for s in member_indices])
+                # Map bin indices to physical centres
+                cx = np.mean(centers0[coords[:, 0]])
+                cy = np.mean(centers1[coords[:, 1]])
+                centroids[c] = (cx, cy)
+
+            # Determine goal macro states
+            goal_macro_states = set()
+            for gs in self.goal_states:
+                if gs in self.micro_to_macro:
+                    goal_macro_states.add(self.micro_to_macro[gs])
+
+            # Compute best macro action per cluster
+            V_macro = self.M_macro @ self.C_macro
+            ax = plt.gca()
+            for c in range(self.n_clusters):
+                if c not in centroids or c in goal_macro_states:
+                    continue
+                if c not in self.adj_list or not self.adj_list[c]:
+                    continue
+                adj = self.adj_list[c]
+                values = [V_macro[a] for a in adj]
+                sorted_idx = np.argsort(values)[::-1]
+                target = None
+                for idx in sorted_idx:
+                    if adj[idx] != c:
+                        target = adj[idx]
+                        break
+                if target is None or target not in centroids:
+                    continue
+                x0, y0 = centroids[c]
+                x1, y1 = centroids[target]
+                dx, dy = x1 - x0, y1 - y0
+                ax.annotate(
+                    '', xy=(x1, y1), xytext=(x0, y0),
+                    arrowprops=dict(
+                        arrowstyle='->', lw=2.5,
+                        color='black', shrinkA=8, shrinkB=8,
+                    ),
+                    zorder=10,
+                )
+
+            # Mark centroids with cluster number
+            for c, (cx, cy) in centroids.items():
+                star = '★' if c in goal_macro_states else ''
+                ax.text(cx, cy, f'{c}{star}', fontsize=11, fontweight='bold',
+                        ha='center', va='center',
+                        color='white',
+                        path_effects=[
+                            PathEffects.withStroke(linewidth=3, foreground='black')
+                        ],
+                        zorder=11)
+
+            plt.savefig(f"{save_dir}/Macro_s_actions.png", format="png", bbox_inches='tight')
+            print(f"  Saved cluster+action heatmap to {save_dir}/Macro_s_actions.png")
+
         plt.close()
         print(f"  Saved cluster heatmap to {save_dir}/Macro_s.png")
 
         # Also plot spectral embedding if available
         if self.spectral_positions is not None:
-            colours_arr = np.array(colours[:n_legend])
+            colours_arr = np.array(cluster_colors)
             self._plot_spectral_embedding(save_dir, colours_arr)
 
     # ==================== Composite Key Gridworld Figure ====================
@@ -611,7 +704,7 @@ class MatrixVizMixin(object):
         ax_a.set_yticks(np.arange(-0.5, grid_size, 1), minor=True)
         ax_a.grid(which='minor', color='w', linestyle='-', linewidth=2)
         ax_a.tick_params(which='minor', bottom=False, left=False)
-        ax_a.set_title('(a) Grid Layout', fontsize=14)
+        # ax_a.set_title('(a) Grid Layout', fontsize=14)
 
         # ---- (b) Split value function ----
         ax_b = axes[0, 1]
@@ -646,18 +739,18 @@ class MatrixVizMixin(object):
 
                 ax_b1.set_facecolor('white')
                 ax_b1.imshow(V_no_grid, cmap='copper', vmin=vmin, vmax=vmax)
-                ax_b1.set_title('No Key', fontsize=11)
+                ax_b1.set_title('✗ Without key', fontsize=11)
                 ax_b1.set_xticks(np.arange(grid_size))
                 ax_b1.set_yticks(np.arange(grid_size))
 
                 ax_b2.set_facecolor('white')
                 im_v = ax_b2.imshow(V_has_grid, cmap='copper', vmin=vmin, vmax=vmax)
-                ax_b2.set_title('Has Key', fontsize=11)
+                ax_b2.set_title('★ With key', fontsize=11)
                 ax_b2.set_xticks(np.arange(grid_size))
                 ax_b2.set_yticks(np.arange(grid_size))
 
                 fig.colorbar(im_v, ax=[ax_b1, ax_b2], shrink=0.7, label='Value')
-                fig.text(0.73, 0.93, '(b) Value Function', ha='center', fontsize=14)
+                # fig.text(0.73, 0.93, '(b) Value Function', ha='center', fontsize=14)
             else:
                 V_grid = np.ma.masked_where(
                     wall_mask.reshape(grid_size, grid_size).T,
@@ -665,13 +758,13 @@ class MatrixVizMixin(object):
                 )
                 ax_b.set_facecolor('white')
                 ax_b.imshow(V_grid, cmap='viridis')
-                ax_b.set_title('(b) Value Function', fontsize=14)
+                # ax_b.set_title('(b) Value Function', fontsize=14)
                 ax_b.set_xticks(np.arange(grid_size))
                 ax_b.set_yticks(np.arange(grid_size))
         else:
             ax_b.text(0.5, 0.5, 'No M/C', ha='center', va='center',
                       transform=ax_b.transAxes, fontsize=14)
-            ax_b.set_title('(b) Value Function', fontsize=14)
+            # ax_b.set_title('(b) Value Function', fontsize=14)
 
         # ---- (c) Split cluster maps ----
         ax_c = axes[1, 0]
@@ -684,8 +777,9 @@ class MatrixVizMixin(object):
             ax_c1 = fig.add_subplot(gs_inner_c[1, 0])
             ax_c2 = fig.add_subplot(gs_inner_c[1, 1])
 
+            cmap_d, norm_d = self._cluster_cmap_and_norm()
             for aug_idx, (ax_sub, title) in enumerate(
-                    [(ax_c1, 'No Key'), (ax_c2, 'Has Key')]):
+                    [(ax_c1, '✗ Without key'), (ax_c2, '★ With key')]):
                 aug_labels = np.ones(n_base) * self.n_clusters
                 for micro_idx, macro_idx in self.micro_to_macro.items():
                     state = self.adapter.state_space.index_to_state(micro_idx)
@@ -694,24 +788,24 @@ class MatrixVizMixin(object):
                         if st_aug == aug_idx:
                             aug_labels[base_idx] = macro_idx
                 labels_grid = aug_labels.reshape(grid_size, grid_size).T
-                ax_sub.imshow(labels_grid, cmap='gist_heat')
+                ax_sub.imshow(labels_grid, cmap=cmap_d, norm=norm_d)
                 ax_sub.set_title(title, fontsize=11)
                 ax_sub.set_xticks(np.arange(grid_size))
                 ax_sub.set_yticks(np.arange(grid_size))
 
             # Cluster legend
-            patches_c = [mpatches.Patch(color=cluster_colours[i], label=f'Cluster {i}')
+            patches_c = [mpatches.Patch(color=cluster_colours[i], label=f'{i}')
                          for i in range(self.n_clusters)]
             fig.legend(handles=patches_c, loc='lower left',
                        bbox_to_anchor=(0.02, 0.02), fontsize=8, ncol=2)
-            fig.text(0.27, 0.47, '(c) Macro State Clusters', ha='center', fontsize=14)
+            # fig.text(0.27, 0.47, '(c) Macro State Clusters', ha='center', fontsize=14)
         else:
             labels_arr = np.ones(n_states) * self.n_clusters
             for micro_idx, macro_idx in self.micro_to_macro.items():
                 labels_arr[micro_idx] = macro_idx
             labels_grid = labels_arr.reshape(grid_size, grid_size).T
             ax_c.imshow(labels_grid, cmap='gist_heat')
-            ax_c.set_title('(c) Macro State Clusters', fontsize=14)
+            # ax_c.set_title('(c) Macro State Clusters', fontsize=14)
             ax_c.set_xticks(np.arange(grid_size))
             ax_c.set_yticks(np.arange(grid_size))
 
@@ -723,7 +817,7 @@ class MatrixVizMixin(object):
                     continue
                 positions = self.spectral_positions[states]
                 ax_d.scatter(positions[:, 0], positions[:, 1],
-                             label=f'Cluster {i}', color=cluster_colours[i],
+                             label=f'{i}', color=cluster_colours[i],
                              s=50, alpha=0.7, zorder=3)
                 # 2σ covariance ellipse
                 if len(positions) >= 3:
@@ -758,17 +852,16 @@ class MatrixVizMixin(object):
                     inset.imshow(labels_grid, cmap='gist_heat')
                 inset.set_xticks([])
                 inset.set_yticks([])
-                inset.set_title('Clusters', fontsize=7)
+                # inset.set_title('Clusters', fontsize=7)
         else:
             ax_d.text(0.5, 0.5, 'No spectral data', ha='center', va='center',
                       transform=ax_d.transAxes, fontsize=14)
-        ax_d.set_title('(d) Spectral Embedding', fontsize=14)
+        # ax_d.set_title('(d) Spectral Embedding', fontsize=14)
 
-        fig.suptitle('Key Gridworld — Hierarchical SR Agent', fontsize=16, y=0.98)
-        try:
+        # fig.suptitle('Key Gridworld — Hierarchical SR Agent', fontsize=16, y=0.98)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
             plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-        except Exception:
-            pass  # Mixed gridspec axes may not be compatible with tight_layout
         plt.savefig(save_path, bbox_inches='tight', dpi=150)
         plt.close()
         print(f"Composite figure saved to {save_path}")

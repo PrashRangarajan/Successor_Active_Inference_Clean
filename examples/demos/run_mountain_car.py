@@ -13,6 +13,7 @@ import imageio
 from core import HierarchicalSRAgent
 from environments.mountain_car import MountainCarAdapter
 from examples.configs import MOUNTAINCAR
+from core.eval_utils import plot_planning_steps_bars, plot_planning_cost_bars
 
 # Import gymnasium
 import gymnasium as gym
@@ -94,6 +95,22 @@ def run_mountain_car_example():
     print(f"Hierarchical: {result['steps']} steps, reached goal: {result['reached_goal']}")
     print(f"Flat: {result_flat['steps']} steps, reached goal: {result_flat['reached_goal']}")
 
+    # Planning steps comparison bar chart
+    from collections import OrderedDict
+    steps_data = OrderedDict([
+        ("Hierarchy", result['steps']),
+        ("Flat", result_flat['steps']),
+    ])
+    plot_planning_steps_bars(steps_data,
+                             save_path="figures/mountaincar/planning_steps.png")
+
+    # Planning cost comparison (cached policies: N² vs k² MACs)
+    plot_planning_cost_bars(
+        n_states=adapter.n_states,
+        n_clusters=n_clusters,
+        save_path="figures/mountaincar/planning_cost.png",
+    )
+
     # ==================== Visualization ====================
     print("\n" + "="*50)
     print("VISUALIZATION")
@@ -111,12 +128,15 @@ def run_mountain_car_example():
     # Macro action heatmap (target cluster at each state)
     agent.plot_macro_action_heatmap(save_path="figures/mountaincar/macro_actions.png")
 
+    # Per-transition micro-level policy plots (like gridworld's macro action network)
+    agent.visualize_policy(save_dir="figures/mountaincar/macro_action_network")
+
     # ==================== Record Episode + Trajectory ====================
     print("\n" + "="*50)
     print("RECORDING VIDEO & TRAJECTORY")
     print("="*50)
 
-    frames, positions, velocities, actions = run_episode_with_tracking(
+    frames, positions, velocities, actions, macro_targets = run_episode_with_tracking(
         agent, adapter, init_state, max_steps=500,
     )
 
@@ -140,6 +160,7 @@ def run_mountain_car_example():
             positions, velocities,
             save_path="figures/mountaincar/trajectory_macro_action.png",
             color_by='macro_action',
+            macro_action_targets=macro_targets,
         )
 
         # Trajectory colored by micro action taken
@@ -160,6 +181,7 @@ def run_mountain_car_example():
                 frames, positions, velocities,
                 save_path="figures/mountaincar/mountain_car_combined.mp4",
                 color_by='macro_action',
+                macro_action_targets=macro_targets,
             )
 
     env.close()
@@ -171,11 +193,13 @@ def run_mountain_car_example():
 def run_episode_with_tracking(agent, adapter, init_state, max_steps=500):
     """Run an episode capturing frames, positions, and velocities.
 
-    Uses the agent's own flat policy (``_select_micro_action``) so the
-    recorded trajectory matches what ``run_episode_flat`` would produce.
+    Uses the agent's flat policy (``_select_micro_action``) so the recorded
+    trajectory matches what ``run_episode_flat`` would produce.
 
     Returns:
-        (frames, positions, velocities, actions) tuple
+        (frames, positions, velocities, actions, macro_targets) tuple.
+        macro_targets is None (macro action coloring is computed from the
+        macro policy at visualization time).
     """
     frames = []
     positions = []
@@ -219,7 +243,7 @@ def run_episode_with_tracking(agent, adapter, init_state, max_steps=500):
     if frame is not None:
         frames.append(frame)
 
-    return frames, positions, velocities, actions_taken
+    return frames, positions, velocities, actions_taken, None
 
 if __name__ == '__main__':
     run_mountain_car_example()
