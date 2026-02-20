@@ -453,28 +453,30 @@ class TrajectoryVizMixin(object):
         pos = np.asarray(positions, dtype=float)
         vel = np.asarray(velocities, dtype=float)
 
-        # Auto-select stages: start, key moments, end
+        # Auto-select stages that tell the physical story.
+        #
+        # For oscillatory trajectories (Pendulum swing-up) we target
+        # 5 stages in the "opposite" half of the phase space:
+        #   (a) Start          — right side, ω=0
+        #   (b) Top-left       — negative pos, high positive ω (upswing)
+        #   (c) Middle-left    — negative pos, ω≈0 (swing peak / turning pt)
+        #   (d) Bottom-left    — negative pos, high negative ω (downswing)
+        #   (e) Goal / end     — near origin
+        #
+        # For non-oscillatory trajectories (Mountain Car) we use 3
+        # stages: start, max-distance mid-point, goal.
         if stage_idx is None:
             stage_idx = [0]
 
-            # 1. Find an interesting mid-trajectory moment:
-            #    - extremum of dim-0 (valley for Mountain Car)
-            #    - or peak |velocity| (max swing speed for Pendulum)
-            extremum_idx = int(np.argmin(pos))
-            if extremum_idx not in (0, T - 1):
-                stage_idx.append(extremum_idx)
-            else:
-                # dim-0 min is at start/end — use peak |velocity| instead
-                peak_vel_idx = int(np.argmax(np.abs(vel)))
-                if peak_vel_idx not in (0, T - 1):
-                    stage_idx.append(peak_vel_idx)
+            pos_range = np.ptp(pos) if np.ptp(pos) > 0 else 1.0
+            vel_range = np.ptp(vel) if np.ptp(vel) > 0 else 1.0
 
-            # 2. Find first time the trajectory enters the goal region
-            #    (e.g., first upright moment for pendulum, reaching x≥0.5 for
-            #    Mountain Car).  Uses the adapter's goal bins when available.
+            # --- Goal / end detection ---------------------------------
             goal_arrival = None
+            search_start = max(1, T // 2)
+
             if hasattr(self.adapter, 'discretize_obs') and hasattr(self, 'goal_states'):
-                for k in range(T):
+                for k in range(search_start, T):
                     obs_k = np.array([pos[k], vel[k]])
                     try:
                         disc = self.adapter.discretize_obs(obs_k)
@@ -485,10 +487,61 @@ class TrajectoryVizMixin(object):
                     except Exception:
                         pass
 
-            if goal_arrival is not None and goal_arrival not in stage_idx and goal_arrival != T - 1:
-                stage_idx.append(goal_arrival)
+            if goal_arrival is None:
+                for k in range(search_start, T):
+                    if (abs(pos[k]) < 0.15 * pos_range and
+                            abs(vel[k]) < 0.15 * vel_range):
+                        goal_arrival = k
+                        break
 
-            stage_idx.append(T - 1)
+            # --- Oscillatory vs simple trajectory ---------------------
+            n_sign_changes = sum(1 for k in range(1, T)
+                                 if vel[k - 1] * vel[k] < 0)
+
+            lo = max(1, int(T * 0.05))
+            hi = (goal_arrival - 2) if goal_arrival else min(T - 1, int(T * 0.95))
+            hi = max(lo + 1, hi)
+            candidates = list(range(lo, hi))
+
+            if n_sign_changes >= 4 and candidates:
+                # --- Oscillatory: 3 left-half points (top / mid / bottom) ---
+                pos_mid = (np.min(pos) + np.max(pos)) / 2
+
+                # Top-left: negative pos, highest positive ω
+                top_left = [k for k in candidates if pos[k] < pos_mid and vel[k] > 0]
+                if top_left:
+                    stage_idx.append(max(top_left, key=lambda k: vel[k]))
+
+                # Middle-left: ω sign-change (turning point) with negative pos
+                turning_pts = [k for k in range(lo, hi)
+                               if vel[k - 1] * vel[k] <= 0 and pos[k] < pos_mid]
+                if turning_pts:
+                    # Pick the one with smallest |ω| (closest to ω=0)
+                    stage_idx.append(min(turning_pts, key=lambda k: abs(vel[k])))
+
+                # Bottom-left: negative pos, most negative ω
+                bot_left = [k for k in candidates if pos[k] < pos_mid and vel[k] < 0]
+                if bot_left:
+                    stage_idx.append(min(bot_left, key=lambda k: vel[k]))
+
+            elif candidates:
+                # --- Non-oscillatory: single max-distance mid-point ---
+                ref_goal = goal_arrival if goal_arrival else int(T * 0.75)
+
+                def phase_dist(k, ref_k):
+                    dp = (pos[k] - pos[ref_k]) / pos_range
+                    dv = (vel[k] - vel[ref_k]) / vel_range
+                    return dp * dp + dv * dv
+
+                best_k = max(candidates,
+                             key=lambda k: min(phase_dist(k, 0),
+                                               phase_dist(k, ref_goal)))
+                stage_idx.append(best_k)
+
+            # --- Goal / end -------------------------------------------
+            end_idx = goal_arrival if goal_arrival else T - 1
+            if end_idx not in stage_idx:
+                stage_idx.append(end_idx)
         stage_idx = sorted(set(int(i) for i in stage_idx if 0 <= int(i) < T))
         if len(stage_idx) == 0:
             stage_idx = [0]
