@@ -199,25 +199,29 @@ NEURAL_ACROBOT = {
     "sf_dim": 64,
     "hidden_sizes": (128, 128),
 
-    # Training
+    # Training — lower LR and softer target updates for stability
+    # (aligned with HalfCheetah/InvertedPendulum which converge well)
     "gamma": 0.99,
-    "lr": 1e-3,
-    "lr_w": 1e-3,
-    "batch_size": 128,
-    "buffer_size": 200_000,
-    "target_update_freq": 500,
-    "tau": 0.01,
+    "lr": 3e-4,                       # was 1e-3 — too aggressive for reach tasks
+    "lr_w": 3e-4,                     # was 1e-3
+    "batch_size": 256,                # was 128 — reduce gradient variance
+    "buffer_size": 300_000,           # was 200_000 — smooth distribution shift
+    "target_update_freq": 1000,       # was 500 — less frequent target updates
+    "tau": 0.005,                     # was 0.01 — softer Polyak averaging
     "steps_per_episode": 500,
 
-    # Training schedule
-    "train_episodes_diverse": 2000,   # Phase 1: build SF representation (diverse starts)
-    "train_episodes_fixed": 3000,     # Phase 2: mixed training (diverse_fraction of diverse)
-    "diverse_fraction": 0.3,          # Fraction of Phase 2 episodes using diverse starts
+    # Training schedule — three-phase gradual transition
+    # (avoids hard distribution shift that caused reward crash at ep 2000)
+    "train_episodes_phase1": 1500,    # Phase 1: 100% diverse (build SF representation)
+    "train_episodes_phase2": 1500,    # Phase 2: 60% diverse (gradual shift)
+    "train_episodes_phase3": 2000,    # Phase 3: 30% diverse (task-focused)
+    "diverse_fraction_phase2": 0.6,   # intermediate diversity
+    "diverse_fraction_phase3": 0.3,   # final diversity
 
     # Exploration
     "epsilon_start": 1.0,
     "epsilon_end": 0.05,
-    "epsilon_decay_steps": 80_000,
+    "epsilon_decay_steps": 120_000,   # was 80_000 — longer exploration for reach tasks
 
     # Test
     "test_max_steps": 500,

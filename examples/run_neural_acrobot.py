@@ -5,9 +5,10 @@ tabular agent which discretizes the 4D state space into bins (leading to
 exponential blowup), the neural agent operates directly on raw 6D
 observations.
 
-Training uses two phases:
-1. Diverse exploration: random starts to build the SF representation
-2. Fixed-start training: learn to solve the task from the default state
+Training uses three phases with gradual distribution shift:
+1. Diverse exploration (100%): random starts to build the SF representation
+2. Transition (60% diverse): gradual shift toward task-relevant states
+3. Task-focused (30% diverse): mostly fixed-start to learn swing-up
 
 Usage:
     python examples/run_neural_acrobot.py
@@ -34,16 +35,35 @@ from examples.configs import NEURAL_ACROBOT
 
 
 def acrobot_height_reward(obs):
-    """Dense shaped reward based on Acrobot end-effector height.
+    """Dense shaped reward based on Acrobot end-effector height + velocity.
 
     Height = -cos(θ1) - cos(θ1 + θ2), ranges from -2 (hanging) to +2 (upright).
-    Goal: height > 1.0. We normalize to [-1, 1] range.
+    Goal: height > 1.0. Base reward normalized to [-1, 1] range.
+
+    Near the goal region (height > 0.5), adds a velocity bonus to encourage
+    swinging THROUGH the goal with sufficient angular velocity — aligning the
+    shaped reward with the velocity-filtered goal criterion.
     """
     c1, s1, c2, s2 = float(obs[0]), float(obs[1]), float(obs[2]), float(obs[3])
+    dtheta1 = float(obs[4])
     theta1 = math.atan2(s1, c1)
     theta2 = math.atan2(s2, c2)
     height = -np.cos(theta1) - np.cos(theta1 + theta2)
-    return height / 2.0
+
+    # Base height reward
+    reward = height / 2.0
+
+    # Velocity bonus near goal: reward upward angular velocity
+    # so w learns to value high-height + correct-velocity states
+    if height > 0.5:
+        velocity_bonus = 0.3 * np.clip(dtheta1 / (4 * np.pi), -1.0, 1.0)
+        reward += velocity_bonus
+
+    # Goal threshold bonus: sharp signal when at goal height
+    if height > 1.0:
+        reward += 1.0
+
+    return reward
 
 
 def main():
@@ -104,35 +124,49 @@ def main():
         reward_shaping_fn=acrobot_height_reward,
     )
 
-    # ==================== Two-Phase Training ====================
-    ep_diverse = cfg["train_episodes_diverse"]
-    ep_fixed = cfg["train_episodes_fixed"]
+    # ==================== Three-Phase Training ====================
+    # Gradual transition from diverse to task-focused to avoid the
+    # hard distribution shift that destabilized SF learning.
+    ep1 = cfg["train_episodes_phase1"]
+    ep2 = cfg["train_episodes_phase2"]
+    ep3 = cfg["train_episodes_phase3"]
+    frac2 = cfg["diverse_fraction_phase2"]
+    frac3 = cfg["diverse_fraction_phase3"]
     if args.quick:
-        ep_diverse = 200
-        ep_fixed = 300
+        ep1 = 150
+        ep2 = 150
+        ep3 = 200
         args.n_eval = 5
 
     t0 = time.time()
 
     # Phase 1: Diverse exploration — build SF representation
-    print(f"Phase 1: Diverse exploration ({ep_diverse} episodes)")
+    print(f"Phase 1: Diverse exploration ({ep1} episodes, 100% diverse)")
     agent.learn_environment(
-        num_episodes=ep_diverse,
+        num_episodes=ep1,
         steps_per_episode=cfg["steps_per_episode"],
         diverse_start=True,
-        log_interval=max(1, ep_diverse // 5),
+        log_interval=max(1, ep1 // 5),
     )
 
-    # Phase 2: Mixed training — mostly fixed start with some diverse
-    diverse_frac = cfg.get("diverse_fraction", 0.3)
-    print(f"\nPhase 2: Mixed training ({ep_fixed} episodes, "
-          f"{diverse_frac:.0%} diverse)")
+    # Phase 2: Gradual transition — intermediate diversity
+    print(f"\nPhase 2: Transition ({ep2} episodes, {frac2:.0%} diverse)")
     agent.learn_environment(
-        num_episodes=ep_fixed,
+        num_episodes=ep2,
         steps_per_episode=cfg["steps_per_episode"],
         diverse_start=True,
-        diverse_fraction=diverse_frac,
-        log_interval=max(1, ep_fixed // 5),
+        diverse_fraction=frac2,
+        log_interval=max(1, ep2 // 5),
+    )
+
+    # Phase 3: Task-focused — mostly fixed start
+    print(f"\nPhase 3: Task-focused ({ep3} episodes, {frac3:.0%} diverse)")
+    agent.learn_environment(
+        num_episodes=ep3,
+        steps_per_episode=cfg["steps_per_episode"],
+        diverse_start=True,
+        diverse_fraction=frac3,
+        log_interval=max(1, ep3 // 5),
     )
 
     train_time = time.time() - t0

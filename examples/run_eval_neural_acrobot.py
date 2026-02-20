@@ -47,16 +47,35 @@ from examples.configs import NEURAL_ACROBOT
 # ==================== Reward Shaping ====================
 
 def acrobot_height_reward(obs):
-    """Dense shaped reward based on Acrobot end-effector height.
+    """Dense shaped reward based on Acrobot end-effector height + velocity.
 
     Height = -cos(theta1) - cos(theta1 + theta2), ranges [-2, +2].
-    Goal: height > 1.0. We normalize to [-1, 1].
+    Goal: height > 1.0. Base reward normalized to [-1, 1] range.
+
+    Near the goal region (height > 0.5), adds a velocity bonus to encourage
+    swinging THROUGH the goal with sufficient angular velocity — aligning the
+    shaped reward with the velocity-filtered goal criterion.
     """
     c1, s1, c2, s2 = float(obs[0]), float(obs[1]), float(obs[2]), float(obs[3])
+    dtheta1 = float(obs[4])
     theta1 = math.atan2(s1, c1)
     theta2 = math.atan2(s2, c2)
     height = -np.cos(theta1) - np.cos(theta1 + theta2)
-    return height / 2.0
+
+    # Base height reward
+    reward = height / 2.0
+
+    # Velocity bonus near goal: reward upward angular velocity
+    # so w learns to value high-height + correct-velocity states
+    if height > 0.5:
+        velocity_bonus = 0.3 * np.clip(dtheta1 / (4 * np.pi), -1.0, 1.0)
+        reward += velocity_bonus
+
+    # Goal threshold bonus: sharp signal when at goal height
+    if height > 1.0:
+        reward += 1.0
+
+    return reward
 
 
 # ==================== Agent Factory ====================
@@ -114,28 +133,42 @@ def create_neural_agent(cfg):
     return agent, env_train, base_adapter
 
 
-def train_agent(agent, cfg, ep_diverse, ep_fixed):
-    """Two-phase training: diverse exploration then mixed training."""
-    diverse_frac = cfg.get("diverse_fraction", 0.3)
+def train_agent(agent, cfg, ep1, ep2, ep3):
+    """Three-phase training: gradual transition from diverse to task-focused.
 
-    # Phase 1: Diverse exploration
-    print(f"Phase 1: Diverse exploration ({ep_diverse} episodes)")
+    Avoids the hard distribution shift that destabilized SF learning in the
+    two-phase schedule.
+    """
+    frac2 = cfg.get("diverse_fraction_phase2", 0.6)
+    frac3 = cfg.get("diverse_fraction_phase3", 0.3)
+
+    # Phase 1: Diverse exploration — build SF representation
+    print(f"Phase 1: Diverse exploration ({ep1} episodes, 100% diverse)")
     agent.learn_environment(
-        num_episodes=ep_diverse,
+        num_episodes=ep1,
         steps_per_episode=cfg["steps_per_episode"],
         diverse_start=True,
-        log_interval=max(1, ep_diverse // 5),
+        log_interval=max(1, ep1 // 5),
     )
 
-    # Phase 2: Mixed training
-    print(f"\nPhase 2: Mixed training ({ep_fixed} episodes, "
-          f"{diverse_frac:.0%} diverse)")
+    # Phase 2: Gradual transition — intermediate diversity
+    print(f"\nPhase 2: Transition ({ep2} episodes, {frac2:.0%} diverse)")
     agent.learn_environment(
-        num_episodes=ep_fixed,
+        num_episodes=ep2,
         steps_per_episode=cfg["steps_per_episode"],
         diverse_start=True,
-        diverse_fraction=diverse_frac,
-        log_interval=max(1, ep_fixed // 5),
+        diverse_fraction=frac2,
+        log_interval=max(1, ep2 // 5),
+    )
+
+    # Phase 3: Task-focused — mostly fixed start
+    print(f"\nPhase 3: Task-focused ({ep3} episodes, {frac3:.0%} diverse)")
+    agent.learn_environment(
+        num_episodes=ep3,
+        steps_per_episode=cfg["steps_per_episode"],
+        diverse_start=True,
+        diverse_fraction=frac3,
+        log_interval=max(1, ep3 // 5),
     )
 
 
@@ -193,15 +226,16 @@ def checkpoint_experiment(cfg, args):
         print(f"{'='*60}")
 
         for trial, total_eps in enumerate(episodes_list):
-            # Split total budget into diverse / fixed phases
-            ep_diverse = int(total_eps * 0.4)
-            ep_fixed = total_eps - ep_diverse
+            # Split total budget into three phases (30/30/40)
+            ep1 = int(total_eps * 0.30)
+            ep2 = int(total_eps * 0.30)
+            ep3 = total_eps - ep1 - ep2
 
             print(f"\n--- Checkpoint: {total_eps} episodes "
-                  f"(diverse={ep_diverse}, fixed={ep_fixed}) ---")
+                  f"(phase1={ep1}, phase2={ep2}, phase3={ep3}) ---")
 
             agent, _, _ = create_neural_agent(cfg)
-            train_agent(agent, cfg, ep_diverse, ep_fixed)
+            train_agent(agent, cfg, ep1, ep2, ep3)
 
             results = evaluate_agent(agent, cfg, n_eval)
 
@@ -266,10 +300,16 @@ def record_episode_video(agent, cfg, save_path, max_steps=500):
         total_reward += env_reward
         frames.append(env_render.render())
 
-        if terminated:
-            reached_goal = True
-            break
-        if truncated:
+        if terminated or truncated:
+            # Record the final observation's height so the plot shows
+            # the actual goal-reaching state (not just the last pre-goal obs)
+            c1f, s1f, c2f, s2f = (float(next_obs[0]), float(next_obs[1]),
+                                   float(next_obs[2]), float(next_obs[3]))
+            theta1f = math.atan2(s1f, c1f)
+            theta2f = math.atan2(s2f, c2f)
+            heights.append(-np.cos(theta1f) - np.cos(theta1f + theta2f))
+            if terminated:
+                reached_goal = True
             break
         obs = next_obs
 
@@ -630,15 +670,17 @@ def main():
         print("PHASE A: Full training run (for training curves & video)")
         print("=" * 60)
 
-        ep_diverse = cfg["train_episodes_diverse"]
-        ep_fixed = cfg["train_episodes_fixed"]
+        ep1 = cfg["train_episodes_phase1"]
+        ep2 = cfg["train_episodes_phase2"]
+        ep3 = cfg["train_episodes_phase3"]
         if args_cli.quick:
-            ep_diverse = 200
-            ep_fixed = 300
+            ep1 = 150
+            ep2 = 150
+            ep3 = 200
 
         agent, _, _ = create_neural_agent(cfg)
         t0 = time.time()
-        train_agent(agent, cfg, ep_diverse, ep_fixed)
+        train_agent(agent, cfg, ep1, ep2, ep3)
         train_time = time.time() - t0
         print(f"\nTraining time: {train_time:.1f}s")
 
