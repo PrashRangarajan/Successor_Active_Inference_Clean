@@ -738,7 +738,7 @@ class NeuralSRAgent:
         Args:
             path: File path of the checkpoint.
         """
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         self.sf_net.load_state_dict(checkpoint['sf_net'])
         self.sf_target.load_state_dict(checkpoint['sf_target'])
         self.reward_net.load_state_dict(checkpoint['reward_net'])
