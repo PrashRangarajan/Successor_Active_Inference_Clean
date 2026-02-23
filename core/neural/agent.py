@@ -95,6 +95,7 @@ class NeuralSRAgent:
         self._epsilon_start = epsilon_start
         self._epsilon_end = epsilon_end
         self._epsilon_decay_steps = epsilon_decay_steps
+        self._epsilon_phase_step_offset = 0
 
         # Action subset sampling for large action spaces (used in _update_sf).
         # When n_actions exceeds the threshold, the batch argmax in the Double
@@ -126,6 +127,10 @@ class NeuralSRAgent:
             list(self.reward_net.parameters()) + [self.w], lr=lr_w
         )
 
+        # LR schedulers (created on-demand via reset_lr())
+        self._sf_scheduler = None
+        self._rw_scheduler = None
+
         # Replay buffer
         self.buffer = ReplayBuffer(buffer_size, self.obs_dim)
 
@@ -144,6 +149,16 @@ class NeuralSRAgent:
             'reward_loss': [],
             'episode_reward': [],
             'episode_steps': [],
+            # Diagnostics for phase-transition analysis
+            'q_mean': [],
+            'q_std': [],
+            'q_max': [],
+            'sf_grad_norm': [],
+            'rw_grad_norm': [],
+            'w_norm': [],
+            'epsilon': [],
+            'sf_lr': [],
+            'rw_lr': [],
         }
 
     @staticmethod
@@ -280,6 +295,12 @@ class NeuralSRAgent:
                     self.training_log['sf_loss'].append(sf_loss)
                     self.training_log['reward_loss'].append(rw_loss)
 
+                    # Step LR schedulers if active
+                    if self._sf_scheduler is not None:
+                        self._sf_scheduler.step()
+                    if self._rw_scheduler is not None:
+                        self._rw_scheduler.step()
+
                 # Target network update
                 if self.total_steps % self.target_update_freq == 0:
                     soft_update(self.sf_target, self.sf_net, self.tau)
@@ -294,6 +315,20 @@ class NeuralSRAgent:
             self.buffer.end_episode()
             self.training_log['episode_reward'].append(ep_reward)
             self.training_log['episode_steps'].append(ep_steps)
+            self.training_log['epsilon'].append(self.epsilon)
+            self.training_log['sf_lr'].append(
+                self.sf_optimizer.param_groups[0]['lr']
+            )
+            self.training_log['rw_lr'].append(
+                self.reward_optimizer.param_groups[0]['lr']
+            )
+
+            # Q-value diagnostics from last observation of the episode
+            if obs is not None:
+                q_vals = self.get_q_values(obs)
+                self.training_log['q_mean'].append(float(np.mean(q_vals)))
+                self.training_log['q_std'].append(float(np.std(q_vals)))
+                self.training_log['q_max'].append(float(np.max(q_vals)))
 
             if (episode + 1) % log_interval == 0:
                 avg_reward = np.mean(
@@ -360,9 +395,12 @@ class NeuralSRAgent:
 
         self.sf_optimizer.zero_grad()
         loss.backward()
-        nn.utils.clip_grad_norm_(self.sf_net.parameters(), self.grad_clip)
+        sf_grad_norm = nn.utils.clip_grad_norm_(
+            self.sf_net.parameters(), self.grad_clip
+        )
         self.sf_optimizer.step()
 
+        self.training_log['sf_grad_norm'].append(sf_grad_norm.item())
         return loss.item()
 
     def _select_next_actions_subset(self, next_obs: torch.Tensor) -> torch.Tensor:
@@ -415,16 +453,68 @@ class NeuralSRAgent:
 
         self.reward_optimizer.zero_grad()
         loss.backward()
+
+        rw_grad_norm = nn.utils.clip_grad_norm_(
+            list(self.reward_net.parameters()) + [self.w], self.grad_clip
+        )
+        self.training_log['rw_grad_norm'].append(rw_grad_norm.item())
+        self.training_log['w_norm'].append(self.w.data.norm().item())
+
         self.reward_optimizer.step()
 
         return loss.item()
 
     def _decay_epsilon(self):
-        """Linearly decay epsilon from start to end over decay_steps."""
-        fraction = min(1.0, self.total_steps / max(1, self._epsilon_decay_steps))
+        """Linearly decay epsilon from start to end over decay_steps.
+
+        Uses phase-relative steps so that epsilon restarts correctly
+        after reset_epsilon() is called at phase boundaries.
+        """
+        phase_steps = self.total_steps - self._epsilon_phase_step_offset
+        fraction = min(1.0, phase_steps / max(1, self._epsilon_decay_steps))
         self.epsilon = self._epsilon_start + fraction * (
             self._epsilon_end - self._epsilon_start
         )
+
+    def reset_epsilon(self, new_start: float, new_decay_steps: int):
+        """Reset epsilon for a new training phase.
+
+        At phase transitions, the exploration schedule needs to restart
+        to give the agent budget to discover the new start-state distribution.
+
+        Args:
+            new_start: New epsilon starting value (e.g., 0.3).
+            new_decay_steps: Steps over which to decay to epsilon_end.
+        """
+        self._epsilon_start = new_start
+        self._epsilon_decay_steps = new_decay_steps
+        self.epsilon = new_start
+        self._epsilon_phase_step_offset = self.total_steps
+
+    def reset_lr(self, sf_lr: float, rw_lr: float, decay_steps: int):
+        """Reset learning rates for a new training phase with cosine annealing.
+
+        Creates cosine annealing schedulers that decay LR from the given
+        peak to 10% of peak over the specified number of training steps.
+
+        Args:
+            sf_lr: New peak LR for the SF optimizer.
+            rw_lr: New peak LR for the reward optimizer.
+            decay_steps: Number of training steps for the cosine decay period.
+        """
+        for pg in self.sf_optimizer.param_groups:
+            pg['lr'] = sf_lr
+        for pg in self.reward_optimizer.param_groups:
+            pg['lr'] = rw_lr
+
+        self._sf_scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            self.sf_optimizer, T_max=max(1, decay_steps), eta_min=sf_lr * 0.1
+        )
+        self._rw_scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            self.reward_optimizer, T_max=max(1, decay_steps), eta_min=rw_lr * 0.1
+        )
+        print(f"  LR reset: SF={sf_lr:.1e}, RW={rw_lr:.1e}, "
+              f"cosine decay over {decay_steps} steps")
 
     # ==================== Action Selection ====================
 
@@ -513,6 +603,20 @@ class NeuralSRAgent:
     run_episode_flat = run_episode
 
     # ==================== Goal Transfer ====================
+
+    def truncate_buffer(self, keep_fraction: float):
+        """Truncate the replay buffer, keeping only the most recent data.
+
+        Call at phase boundaries to remove stale data from previous phases
+        that no longer reflects the current training distribution.
+
+        Args:
+            keep_fraction: Fraction of buffer to keep (0.0 to 1.0).
+        """
+        old_size = self.buffer.size
+        self.buffer.truncate(keep_fraction)
+        print(f"  Buffer truncated: {old_size} -> {self.buffer.size} "
+              f"(kept {keep_fraction:.0%})")
 
     def relearn_reward_weights(self, n_updates: int = 1000):
         """Re-learn w for a new goal without re-training φ.
@@ -614,6 +718,11 @@ class NeuralSRAgent:
             'reward_optimizer': self.reward_optimizer.state_dict(),
             'total_steps': self.total_steps,
             'epsilon': self.epsilon,
+            'epsilon_phase_step_offset': self._epsilon_phase_step_offset,
+            'sf_scheduler': (self._sf_scheduler.state_dict()
+                             if self._sf_scheduler else None),
+            'rw_scheduler': (self._rw_scheduler.state_dict()
+                             if self._rw_scheduler else None),
             'config': {
                 'obs_dim': self.obs_dim,
                 'n_actions': self.n_actions,
@@ -638,3 +747,10 @@ class NeuralSRAgent:
         self.reward_optimizer.load_state_dict(checkpoint['reward_optimizer'])
         self.total_steps = checkpoint['total_steps']
         self.epsilon = checkpoint['epsilon']
+        self._epsilon_phase_step_offset = checkpoint.get(
+            'epsilon_phase_step_offset', 0
+        )
+        if checkpoint.get('sf_scheduler') and self._sf_scheduler:
+            self._sf_scheduler.load_state_dict(checkpoint['sf_scheduler'])
+        if checkpoint.get('rw_scheduler') and self._rw_scheduler:
+            self._rw_scheduler.load_state_dict(checkpoint['rw_scheduler'])

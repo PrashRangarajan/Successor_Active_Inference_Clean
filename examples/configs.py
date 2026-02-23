@@ -217,11 +217,19 @@ NEURAL_ACROBOT = {
     "train_episodes_phase3": 2000,    # Phase 3: 30% diverse (task-focused)
     "diverse_fraction_phase2": 0.6,   # intermediate diversity
     "diverse_fraction_phase3": 0.3,   # final diversity
+    "buffer_keep_phase2": 0.3,        # keep 30% of buffer at Phase 1→2
+    "buffer_keep_phase3": 0.5,        # keep 50% of buffer at Phase 2→3
+    "lr_phase2_fraction": 0.5,        # Phase 2 LR = 50% of initial
+    "lr_phase3_fraction": 0.25,       # Phase 3 LR = 25% of initial
 
-    # Exploration
+    # Exploration — phase-aware epsilon resets at distribution shifts
     "epsilon_start": 1.0,
     "epsilon_end": 0.05,
-    "epsilon_decay_steps": 120_000,   # was 80_000 — longer exploration for reach tasks
+    "epsilon_decay_steps": 120_000,          # Phase 1 decay
+    "epsilon_phase2_start": 0.3,             # Bump at Phase 1→2 boundary
+    "epsilon_phase2_decay_steps": 80_000,    # Decay within Phase 2
+    "epsilon_phase3_start": 0.15,            # Smaller bump at Phase 2→3
+    "epsilon_phase3_decay_steps": 50_000,    # Decay within Phase 3
 
     # Test
     "test_max_steps": 500,
@@ -230,10 +238,10 @@ NEURAL_ACROBOT = {
     "terminal_bonus": 100.0,  # Bonus when env terminates (goal reached)
 
     # Eval-specific
-    "eval_n_runs": 5,
-    "eval_episodes": [200, 500, 1000, 2000, 3000, 5000],
+    "eval_n_runs": 8,
+    "eval_episodes": [500, 1000, 2000, 3000, 5000],
     "eval_quick_episodes": [500, 1000, 2000],
-    "eval_quick_n_runs": 2,
+    "eval_quick_n_runs": 5,
 }
 
 # =====================================================================

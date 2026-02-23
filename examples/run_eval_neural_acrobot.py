@@ -152,6 +152,16 @@ def train_agent(agent, cfg, ep1, ep2, ep3):
     )
 
     # Phase 2: Gradual transition — intermediate diversity
+    agent.truncate_buffer(keep_fraction=cfg.get("buffer_keep_phase2", 0.3))
+    agent.reset_epsilon(
+        new_start=cfg.get("epsilon_phase2_start", 0.3),
+        new_decay_steps=cfg.get("epsilon_phase2_decay_steps", 80_000),
+    )
+    agent.reset_lr(
+        sf_lr=cfg["lr"] * cfg.get("lr_phase2_fraction", 0.5),
+        rw_lr=cfg["lr_w"] * cfg.get("lr_phase2_fraction", 0.5),
+        decay_steps=ep2 * cfg["steps_per_episode"],
+    )
     print(f"\nPhase 2: Transition ({ep2} episodes, {frac2:.0%} diverse)")
     agent.learn_environment(
         num_episodes=ep2,
@@ -162,6 +172,16 @@ def train_agent(agent, cfg, ep1, ep2, ep3):
     )
 
     # Phase 3: Task-focused — mostly fixed start
+    agent.truncate_buffer(keep_fraction=cfg.get("buffer_keep_phase3", 0.5))
+    agent.reset_epsilon(
+        new_start=cfg.get("epsilon_phase3_start", 0.15),
+        new_decay_steps=cfg.get("epsilon_phase3_decay_steps", 50_000),
+    )
+    agent.reset_lr(
+        sf_lr=cfg["lr"] * cfg.get("lr_phase3_fraction", 0.25),
+        rw_lr=cfg["lr_w"] * cfg.get("lr_phase3_fraction", 0.25),
+        decay_steps=ep3 * cfg["steps_per_episode"],
+    )
     print(f"\nPhase 3: Task-focused ({ep3} episodes, {frac3:.0%} diverse)")
     agent.learn_environment(
         num_episodes=ep3,

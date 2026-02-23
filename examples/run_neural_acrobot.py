@@ -74,6 +74,8 @@ def main():
                         help="Number of evaluation episodes")
     parser.add_argument("--save-dir", type=str, default="data/neural_acrobot",
                         help="Directory to save checkpoints")
+    parser.add_argument("--device", type=str, default="cpu",
+                        help="Torch device ('cpu' or 'cuda')")
     args = parser.parse_args()
 
     cfg = NEURAL_ACROBOT
@@ -99,6 +101,13 @@ def main():
     print()
 
     # ==================== Create Agent ====================
+    import torch
+    device = args.device
+    if device == 'cuda' and not torch.cuda.is_available():
+        print("CUDA not available, falling back to CPU")
+        device = 'cpu'
+    print(f"Device: {device}")
+
     agent = NeuralSRAgent(
         adapter=adapter,
         sf_dim=cfg["sf_dim"],
@@ -113,6 +122,7 @@ def main():
         epsilon_start=cfg["epsilon_start"],
         epsilon_end=cfg["epsilon_end"],
         epsilon_decay_steps=cfg["epsilon_decay_steps"],
+        device=device,
     )
 
     agent.set_goal(
@@ -148,8 +158,19 @@ def main():
         diverse_start=True,
         log_interval=max(1, ep1 // 5),
     )
+    agent.save(os.path.join(args.save_dir, "checkpoint_phase1.pt"))
 
     # Phase 2: Gradual transition — intermediate diversity
+    agent.truncate_buffer(keep_fraction=cfg["buffer_keep_phase2"])
+    agent.reset_epsilon(
+        new_start=cfg["epsilon_phase2_start"],
+        new_decay_steps=cfg["epsilon_phase2_decay_steps"],
+    )
+    agent.reset_lr(
+        sf_lr=cfg["lr"] * cfg["lr_phase2_fraction"],
+        rw_lr=cfg["lr_w"] * cfg["lr_phase2_fraction"],
+        decay_steps=ep2 * cfg["steps_per_episode"],
+    )
     print(f"\nPhase 2: Transition ({ep2} episodes, {frac2:.0%} diverse)")
     agent.learn_environment(
         num_episodes=ep2,
@@ -158,8 +179,19 @@ def main():
         diverse_fraction=frac2,
         log_interval=max(1, ep2 // 5),
     )
+    agent.save(os.path.join(args.save_dir, "checkpoint_phase2.pt"))
 
     # Phase 3: Task-focused — mostly fixed start
+    agent.truncate_buffer(keep_fraction=cfg["buffer_keep_phase3"])
+    agent.reset_epsilon(
+        new_start=cfg["epsilon_phase3_start"],
+        new_decay_steps=cfg["epsilon_phase3_decay_steps"],
+    )
+    agent.reset_lr(
+        sf_lr=cfg["lr"] * cfg["lr_phase3_fraction"],
+        rw_lr=cfg["lr_w"] * cfg["lr_phase3_fraction"],
+        decay_steps=ep3 * cfg["steps_per_episode"],
+    )
     print(f"\nPhase 3: Task-focused ({ep3} episodes, {frac3:.0%} diverse)")
     agent.learn_environment(
         num_episodes=ep3,

@@ -111,6 +111,67 @@ class ReplayBuffer:
                         continue
             break
 
+    def truncate(self, keep_fraction: float):
+        """Keep only the most recent fraction of stored transitions.
+
+        Used at phase boundaries to remove stale data from previous
+        training phases that no longer reflects the current distribution.
+
+        Args:
+            keep_fraction: Fraction of current buffer to keep (0.0 to 1.0).
+                E.g., 0.3 keeps the most recent 30% of transitions.
+        """
+        if keep_fraction >= 1.0 or self.size == 0:
+            return
+
+        n_keep = max(1, int(self.size * keep_fraction))
+
+        if self._ptr >= n_keep:
+            # Most recent data is contiguous: [ptr - n_keep, ptr)
+            start = self._ptr - n_keep
+            self.obs[:n_keep] = self.obs[start:self._ptr].copy()
+            self.actions[:n_keep] = self.actions[start:self._ptr].copy()
+            self.rewards[:n_keep] = self.rewards[start:self._ptr].copy()
+            self.next_obs[:n_keep] = self.next_obs[start:self._ptr].copy()
+            self.dones[:n_keep] = self.dones[start:self._ptr].copy()
+        else:
+            # Data wraps around: [capacity - (n_keep - ptr), capacity) + [0, ptr)
+            tail_len = n_keep - self._ptr
+            tail_start = self.capacity - tail_len
+            new_obs = np.concatenate([
+                self.obs[tail_start:self.capacity],
+                self.obs[:self._ptr]
+            ], axis=0)
+            new_actions = np.concatenate([
+                self.actions[tail_start:self.capacity],
+                self.actions[:self._ptr]
+            ])
+            new_rewards = np.concatenate([
+                self.rewards[tail_start:self.capacity],
+                self.rewards[:self._ptr]
+            ])
+            new_next_obs = np.concatenate([
+                self.next_obs[tail_start:self.capacity],
+                self.next_obs[:self._ptr]
+            ], axis=0)
+            new_dones = np.concatenate([
+                self.dones[tail_start:self.capacity],
+                self.dones[:self._ptr]
+            ])
+            self.obs[:n_keep] = new_obs
+            self.actions[:n_keep] = new_actions
+            self.rewards[:n_keep] = new_rewards
+            self.next_obs[:n_keep] = new_next_obs
+            self.dones[:n_keep] = new_dones
+
+        self.size = n_keep
+        self._ptr = n_keep % self.capacity
+
+        # Reset episode tracking (no longer valid after truncation)
+        self._episode_starts.clear()
+        self._episode_lengths.clear()
+        self._episode_start_idx = self._ptr
+
     def sample_uniform(self, batch_size: int,
                        device: Optional[torch.device] = None) -> Dict[str, torch.Tensor]:
         """Sample a random batch of transitions.
