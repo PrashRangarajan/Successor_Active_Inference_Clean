@@ -138,6 +138,22 @@ PENDULUM = {
 }
 
 # =====================================================================
+# Pendulum (Sparse Reward)
+# =====================================================================
+# Same dynamics as PENDULUM but with a step-function reward: +reward
+# inside a small ball near upright, slight negative elsewhere.
+# Tests whether hierarchy helps when V = M @ C has a weak gradient.
+PENDULUM_SPARSE = {
+    **PENDULUM,
+
+    # Sparse reward parameters
+    "sparse_radius": 0.5,            # θ² + 0.1·ω² < radius² → goal (~2.5% of states)
+    "sparse_reward": 10.0,           # reward inside the ball
+    "sparse_default_cost": -0.1,     # slight penalty outside
+    "sparse_goal_threshold": 0.0,    # C value cutoff for _is_at_goal
+}
+
+# =====================================================================
 # CartPole (experimental — survival task, not goal-reaching)
 # =====================================================================
 CARTPOLE = {

@@ -139,11 +139,20 @@ def run_cartpole_example():
     agent.view_matrices(save_dir="figures/cartpole/matrices", learned=True)
     print("  Saved matrix visualizations to figures/cartpole/matrices/")
 
-    # Value function 2D projection (average over velocities)
-    plot_value_function_2d(agent, adapter_test, "figures/cartpole/value_function_2d.png")
+    # Value function, policy, and overlay plots
+    agent.plot_value_function(save_path="figures/cartpole/value_function.png")
+    agent.plot_policy(save_path="figures/cartpole/policy.png")
+    agent.plot_value_with_policy(save_path="figures/cartpole/value_with_policy.png")
 
     # Macro state distribution
     plot_macro_distribution(agent, "figures/cartpole/macro_distribution.png")
+
+    # Macro action heatmap (target cluster at each state)
+    agent.plot_macro_action_heatmap(save_path="figures/cartpole/macro_actions.png")
+
+    # Macro action network (per-transition micro-level policies)
+    agent.visualize_policy(save_dir="figures/cartpole/macro_action_network")
+    print("  Saved policy visualizations to figures/cartpole/macro_action_network/")
 
     # ==================== Record Video ====================
     print("\n" + "=" * 50)
@@ -237,45 +246,6 @@ def run_episode_with_video(agent, adapter, init_state, max_steps):
         frames.append(frame)
 
     return frames
-
-def plot_value_function_2d(agent, adapter, save_path):
-    """Plot 2D projection of value function over (pos, angle), averaged over velocities."""
-    if agent.M is None or agent.C is None:
-        print("  No M or C to visualize")
-        return
-
-    V = adapter.multiply_M_C(agent.M, agent.C)
-
-    n_pos = adapter.n_pos_bins
-    n_vel = adapter.n_vel_bins
-    n_angle = adapter.n_angle_bins
-    n_ang_vel = adapter.n_ang_vel_bins
-
-    # Reshape to 4D and average over velocity dimensions
-    V_4d = V.reshape(n_pos, n_vel, n_angle, n_ang_vel)
-    V_2d = np.mean(V_4d, axis=(1, 3))  # average over vel and ang_vel
-
-    pos_centers, _, angle_centers, _ = adapter.get_bin_centers()
-
-    fig, ax = plt.subplots(figsize=(10, 8))
-    im = ax.imshow(V_2d.T, origin='lower', aspect='auto',
-                   extent=[pos_centers[0], pos_centers[-1],
-                           angle_centers[0], angle_centers[-1]],
-                   cmap='viridis')
-    ax.set_xlabel("Cart Position", fontsize=14)
-    ax.set_ylabel("Pole Angle (rad)", fontsize=14)
-    ax.set_title("Value Function V = M @ C\n(averaged over velocities)", fontsize=16)
-    plt.colorbar(im, ax=ax, label="Value")
-
-    # Mark goal region
-    ax.axvline(x=0, color='r', linestyle='--', alpha=0.5)
-    ax.axhline(y=0, color='r', linestyle='--', alpha=0.5, label='Center (balanced)')
-    ax.legend(fontsize=12)
-
-    plt.tight_layout()
-    plt.savefig(save_path, bbox_inches='tight')
-    plt.close()
-    print(f"  Saved value function plot to {save_path}")
 
 def plot_macro_distribution(agent, save_path):
     """Plot distribution of states across macro clusters."""

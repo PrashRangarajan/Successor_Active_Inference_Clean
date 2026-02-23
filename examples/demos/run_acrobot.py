@@ -139,8 +139,10 @@ def run_acrobot_example():
         np.save("figures/acrobot/B_acrobot.npy", agent.B)
         print("  Saved B matrix to figures/acrobot/B_acrobot.npy")
 
-    # Plot a 2D projection of the value function (averaging over velocities)
-    plot_value_function_2d(agent, "figures/acrobot/value_function_2d.png")
+    # Value function, policy, and overlay plots
+    agent.plot_value_function(save_path="figures/acrobot/value_function.png")
+    agent.plot_policy(save_path="figures/acrobot/policy.png")
+    agent.plot_value_with_policy(save_path="figures/acrobot/value_with_policy.png")
 
     # Plot macro state distribution
     plot_macro_distribution(agent, "figures/acrobot/macro_distribution.png")
@@ -153,33 +155,6 @@ def run_acrobot_example():
     print("\n" + "="*50)
     print("DONE")
     print("="*50)
-
-def plot_value_function_2d(agent, save_path: str):
-    """Plot 2D projection of value function over (theta1, theta2), averaged over velocities."""
-    if agent.M is None or agent.C is None:
-        print("  No M or C to visualize")
-        return
-
-    V = agent.adapter.multiply_M_C(agent.M, agent.C)
-
-    n_theta = agent.adapter.n_theta_bins
-    n_dtheta = agent.adapter.n_dtheta_bins
-
-    # Reshape to 4D and average over velocity dimensions
-    V_4d = V.reshape(n_theta, n_theta, n_dtheta, n_dtheta)
-    V_2d = np.mean(V_4d, axis=(2, 3))
-
-    plt.figure(figsize=(8, 6))
-    plt.imshow(V_2d.T, origin='lower', aspect='equal', cmap='viridis',
-               extent=[-np.pi, np.pi, -np.pi, np.pi])
-    plt.colorbar(label='Value (avg over velocities)')
-    plt.xlabel('theta1 (rad)')
-    plt.ylabel('theta2 (rad)')
-    plt.title('Value Function V = M @ C\n(averaged over angular velocities)')
-    plt.tight_layout()
-    plt.savefig(save_path)
-    plt.close()
-    print(f"  Saved value function plot to {save_path}")
 
 def plot_macro_distribution(agent, save_path: str):
     """Plot distribution of states across macro clusters."""

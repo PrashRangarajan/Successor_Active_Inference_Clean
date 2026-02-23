@@ -205,8 +205,17 @@ def run_pomdp_gridworld_example(layout_name="fourrooms"):
 
     # Standard agent visualizations
     agent.visualize_clusters(save_dir="figures/pomdp_gridworld/clustering")
-    agent.visualize_value_function(save_path="figures/pomdp_gridworld/value_function.png")
+    agent.plot_value_function(save_path="figures/pomdp_gridworld/value_function.png")
+    agent.plot_policy(save_path="figures/pomdp_gridworld/policy.png")
+    agent.plot_value_with_policy(save_path="figures/pomdp_gridworld/value_with_policy.png")
     agent.view_matrices(save_dir="figures/pomdp_gridworld/matrices")
+
+    # Macro action heatmap (target cluster at each state)
+    agent.plot_macro_action_heatmap(save_path="figures/pomdp_gridworld/macro_actions.png")
+
+    # Macro action network (per-transition micro-level policies)
+    agent.visualize_policy(save_dir="figures/pomdp_gridworld/macro_action_network")
+    print("  Saved policy visualizations to figures/pomdp_gridworld/macro_action_network/")
 
     # ==================== Test Phase ====================
     print("\n" + "=" * 50)

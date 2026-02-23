@@ -21,40 +21,6 @@ from examples.configs import PENDULUM
 
 import gymnasium as gym
 
-def plot_value_function_2d(agent, adapter, save_path="figures/pendulum/value_function_2d.png"):
-    """Plot value function as a 2D heatmap over (θ, ω)."""
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-
-    V = adapter.multiply_M_C(agent.M, agent.C)
-    theta_centers, omega_centers = adapter.get_bin_centers()
-
-    # Reshape V to 2D grid (theta × omega)
-    V_grid = np.zeros((adapter.n_theta_bins, adapter.n_omega_bins))
-    for t in range(adapter.n_theta_bins):
-        for w in range(adapter.n_omega_bins):
-            idx = adapter.state_space.state_to_index((t, w))
-            V_grid[t, w] = V[idx]
-
-    fig, ax = plt.subplots(figsize=(10, 8))
-    im = ax.imshow(V_grid.T, origin='lower', aspect='auto',
-                   extent=[theta_centers[0], theta_centers[-1],
-                           omega_centers[0], omega_centers[-1]],
-                   cmap='viridis')
-    ax.set_xlabel("θ (angle)", fontsize=14)
-    ax.set_ylabel("ω (angular velocity)", fontsize=14)
-    ax.set_title("Value Function V = M @ C", fontsize=16)
-    plt.colorbar(im, ax=ax, label="Value")
-
-    # Mark goal region
-    ax.axvline(x=0, color='r', linestyle='--', alpha=0.5, label='Upright (θ=0)')
-    ax.axhline(y=0, color='r', linestyle='--', alpha=0.5)
-    ax.legend(fontsize=12)
-
-    plt.tight_layout()
-    plt.savefig(save_path, bbox_inches='tight')
-    plt.close()
-    print(f"  Value function heatmap saved to {save_path}")
-
 def run_episode_with_tracking(agent, adapter, init_state, max_steps=200):
     """Run an episode capturing frames, positions, velocities, and actions.
 
@@ -261,8 +227,10 @@ def run_pendulum_example():
 
     os.makedirs("figures/pendulum", exist_ok=True)
 
-    # Value function heatmap
-    plot_value_function_2d(agent, adapter)
+    # Value function, policy, and overlay plots
+    agent.plot_value_function(save_path="figures/pendulum/value_function.png")
+    agent.plot_policy(save_path="figures/pendulum/policy.png")
+    agent.plot_value_with_policy(save_path="figures/pendulum/value_with_policy.png")
 
     # Cluster heatmap
     agent.visualize_clusters(save_dir="figures/pendulum/clustering")
@@ -273,6 +241,10 @@ def run_pendulum_example():
     # Matrix visualizations
     agent.view_matrices(save_dir="figures/pendulum/matrices", learned=True)
     print("  Saved matrix visualizations to figures/pendulum/matrices/")
+
+    # Macro action network (per-transition micro-level policies)
+    agent.visualize_policy(save_dir="figures/pendulum/macro_action_network")
+    print("  Saved policy visualizations to figures/pendulum/macro_action_network/")
 
     # Test hierarchical policy
     print("\n" + "=" * 50)

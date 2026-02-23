@@ -186,3 +186,7 @@ class GridworldAdapter(BaseEnvironmentAdapter):
         """Get human-readable state label."""
         x, y = self.state_space.index_to_state(state_index)
         return f"({x},{y})"
+
+    def get_action_labels(self) -> List[str]:
+        """Return human-readable labels for each action index."""
+        return ["\u2190 Left", "\u2192 Right", "\u2191 Up", "\u2193 Down"]

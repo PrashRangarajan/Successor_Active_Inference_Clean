@@ -110,8 +110,9 @@ def run_key_gridworld_example():
     print("  Saved cluster visualizations to figures/key_gridworld/clustering/")
 
     # Visualize value function
-    agent.visualize_value_function(save_path="figures/key_gridworld/value_function.png")
-    print("  Saved value function to figures/key_gridworld/value_function.png")
+    agent.plot_value_function(save_path="figures/key_gridworld/value_function.png")
+    agent.plot_policy(save_path="figures/key_gridworld/policy.png")
+    agent.plot_value_with_policy(save_path="figures/key_gridworld/value_with_policy.png")
 
     # Run another episode and visualize trajectory
     agent.reset_episode(init_state=init_loc + (0,))

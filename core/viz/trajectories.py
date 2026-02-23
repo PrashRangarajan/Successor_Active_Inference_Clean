@@ -1252,10 +1252,11 @@ class TrajectoryVizMixin(object):
                             fontweight='bold', color='w')
 
         if self.labels_grid is not None:
-            im = plt.imshow(self.labels_grid, cmap='gist_heat')
-            colours = im.cmap(im.norm(np.unique(self.labels_grid)))
+            cmap_d, norm_d = self._cluster_cmap_and_norm()
+            im = plt.imshow(self.labels_grid, cmap=cmap_d, norm=norm_d)
+            colours = self._cluster_colours()
             patches = [mpatches.Patch(color=colours[i], label=f'{i}')
-                       for i in range(len(colours) - 1)]
+                       for i in range(self.n_clusters)]
             plt.legend(handles=patches, bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
 
         # plt.title(title, fontsize=16)
@@ -1325,7 +1326,7 @@ class TrajectoryVizMixin(object):
             ax.set_yticks(np.arange(grid_size))
 
         # Add legend
-        colours = plt.cm.gist_heat(np.linspace(0, 0.8, self.n_clusters))
+        colours = self._cluster_colours()
         patches = [mpatches.Patch(color=colours[i], label=f'{i}')
                    for i in range(self.n_clusters)]
         fig.legend(handles=patches, loc='center right', borderaxespad=0.5)

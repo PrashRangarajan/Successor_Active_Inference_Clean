@@ -131,6 +131,11 @@ def run_mountain_car_example():
     # Per-transition micro-level policy plots (like gridworld's macro action network)
     agent.visualize_policy(save_dir="figures/mountaincar/macro_action_network")
 
+    # Value function, policy, and overlay plots
+    agent.plot_value_function(save_path="figures/mountaincar/value_function.png")
+    agent.plot_policy(save_path="figures/mountaincar/policy.png")
+    agent.plot_value_with_policy(save_path="figures/mountaincar/value_with_policy.png")
+
     # ==================== Record Episode + Trajectory ====================
     print("\n" + "="*50)
     print("RECORDING VIDEO & TRAJECTORY")

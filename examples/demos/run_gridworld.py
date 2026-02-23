@@ -104,7 +104,9 @@ def run_gridworld_example(layout_name="fourrooms"):
     print("  Saved cluster visualizations to figures/gridworld/clustering/")
 
     # Visualize value function
-    agent.visualize_value_function(save_path="figures/gridworld/value_function.png")
+    agent.plot_value_function(save_path="figures/gridworld/value_function.png")
+    agent.plot_policy(save_path="figures/gridworld/policy.png")
+    agent.plot_value_with_policy(save_path="figures/gridworld/value_with_policy.png")
     print("  Saved value function to figures/gridworld/value_function.png")
 
     # Run another episode and visualize trajectory

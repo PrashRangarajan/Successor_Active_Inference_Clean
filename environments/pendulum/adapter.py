@@ -229,6 +229,52 @@ class PendulumAdapter(BinnedContinuousAdapter):
             C = np.zeros_like(C_raw)
         return C
 
+    def create_sparse_prior(self, radius: float = 1.0,
+                            reward: float = 10.0,
+                            default_cost: float = -0.1) -> np.ndarray:
+        """Create a sparse reward vector C for all states.
+
+        Gives ``+reward`` to states within a quadratic ball of the
+        upright position and ``default_cost`` everywhere else::
+
+            C(s) = reward      if  θ² + 0.1·ω² < radius²
+                   default_cost   otherwise
+
+        This uses the same quadratic metric as :meth:`create_shaped_prior`
+        but applies a hard threshold, producing a step-function reward
+        landscape.  With sparse C the value function ``V = M @ C`` has a
+        much weaker gradient far from goal, making flat planning harder.
+        Hierarchical planning compensates because ``C_macro`` concentrates
+        the sparse signal at the cluster level.
+
+        Args:
+            radius: Threshold in the ``(θ, √0.1·ω)`` metric.
+                A value of ~1.0 yields roughly 15-25 goal states
+                at 21×21 resolution (~4 % of state space).
+            reward: Reward value for states inside the ball.
+            default_cost: Cost for states outside the ball
+                (small negative encourages reaching goal faster).
+
+        Returns:
+            C vector of shape ``(n_states,)``
+        """
+        theta_centers, omega_centers = self.get_bin_centers()
+        C = np.full(self.n_states, default_cost)
+
+        n_goal = 0
+        for t in range(self.n_theta_bins):
+            for w in range(self.n_omega_bins):
+                theta = theta_centers[t]
+                omega = omega_centers[w]
+                if theta ** 2 + 0.1 * omega ** 2 < radius ** 2:
+                    idx = self.state_space.state_to_index((t, w))
+                    C[idx] = reward
+                    n_goal += 1
+
+        print(f"Sparse prior: {n_goal}/{self.n_states} goal states "
+              f"(radius={radius}, reward={reward}, cost={default_cost})")
+        return C
+
     # ==================== Clustering ====================
 
     def get_clustering_affinity(self, M: np.ndarray,
@@ -350,6 +396,12 @@ class PendulumAdapter(BinnedContinuousAdapter):
         else:
             theta, omega = float(obs[0]), float(obs[1])
         return theta, omega
+
+    def get_action_labels(self) -> List[str]:
+        """Return human-readable labels for each action index."""
+        torque_edges = np.linspace(-2.0, 2.0, self._n_actions + 1)
+        centers = 0.5 * (torque_edges[:-1] + torque_edges[1:])
+        return [f"τ={c:.1f}" for c in centers]
 
     def render(self) -> Optional[np.ndarray]:
         """Render the current frame (for video capture)."""

@@ -214,3 +214,11 @@ class CartPoleAdapter(BinnedContinuousAdapter):
         ang_vel_centers = 0.5 * (ang_vel_edges[:-1] + ang_vel_edges[1:])
 
         return pos_centers, vel_centers, angle_centers, ang_vel_centers
+
+    def get_dimension_labels(self) -> Tuple[str, str]:
+        """Return human-readable axis labels for the 2D projected state space."""
+        return ("Cart Position", "Pole Angle")
+
+    def get_action_labels(self) -> List[str]:
+        """Return human-readable labels for each action index."""
+        return ["\u2190 Push Left", "\u2192 Push Right"]

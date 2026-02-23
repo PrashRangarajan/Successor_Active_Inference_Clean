@@ -309,6 +309,10 @@ class HierarchicalSRAgent(VisualizationMixin):
         print(f"Shaped goal: {len(self.goal_states)} high-reward states "
               f"(C ≥ {goal_threshold:.1f}), threshold={goal_threshold:.1f}")
 
+        # Recompute macro-level preference if clusters already exist
+        if hasattr(self, 'macro_state_list') and self.macro_state_list is not None:
+            self._compute_macro_preference()
+
     def _is_at_goal(self) -> bool:
         """Check if the agent has reached a goal state.
 
