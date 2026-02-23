@@ -69,7 +69,7 @@ def cheetah_velocity_reward(obs):
 
 # ==================== Agent Factory ====================
 
-def create_agent(cfg, render_mode=None):
+def create_agent(cfg, render_mode=None, device='cpu'):
     """Create a fresh hierarchical neural SF agent for HalfCheetah.
 
     Uses ActionConditionedSFNetwork to handle 729 discrete actions.
@@ -77,6 +77,7 @@ def create_agent(cfg, render_mode=None):
     Args:
         cfg: Config dict (NEURAL_HALF_CHEETAH).
         render_mode: 'rgb_array' for video, None for speed.
+        device: Torch device ('cpu' or 'cuda').
 
     Returns:
         (agent, adapter) tuple.
@@ -108,6 +109,7 @@ def create_agent(cfg, render_mode=None):
         n_cluster_samples=5000,
         adjacency_episodes=500,
         adjacency_episode_length=100,
+        device=device,
     )
 
     # Use velocity-based shaping for richer gradient signal
@@ -124,7 +126,13 @@ def create_agent(cfg, render_mode=None):
 
 
 def train_agent(agent, cfg, ep_diverse, ep_fixed):
-    """Two-phase training: diverse exploration then mixed training."""
+    """Two-phase training: diverse exploration then mixed training.
+
+    Phase boundary management:
+    - Buffer truncation to remove stale diverse-exploration data
+    - Epsilon reset to re-explore under the new start distribution
+    - LR warm restart with cosine annealing
+    """
     diverse_frac = cfg.get("diverse_fraction", 0.3)
 
     print(f"Phase 1: Diverse exploration ({ep_diverse} episodes)")
@@ -133,6 +141,18 @@ def train_agent(agent, cfg, ep_diverse, ep_fixed):
         steps_per_episode=cfg["steps_per_episode"],
         diverse_start=True,
         log_interval=max(1, ep_diverse // 5),
+    )
+
+    # Phase boundary management
+    agent.truncate_buffer(keep_fraction=cfg.get("buffer_keep_phase2", 0.3))
+    agent.reset_epsilon(
+        new_start=cfg.get("epsilon_phase2_start", 0.3),
+        new_decay_steps=cfg.get("epsilon_phase2_decay_steps", 80_000),
+    )
+    agent.reset_lr(
+        sf_lr=cfg["lr"] * cfg.get("lr_phase2_fraction", 0.5),
+        rw_lr=cfg["lr_w"] * cfg.get("lr_phase2_fraction", 0.5),
+        decay_steps=ep_fixed * cfg["steps_per_episode"],
     )
 
     print(f"\nPhase 2: Mixed training ({ep_fixed} episodes, "
@@ -375,7 +395,7 @@ def plot_checkpoint_curves(episodes_list, avg_rewards, avg_steps, save_dir):
 
 # ==================== Multi-Checkpoint Experiment ====================
 
-def checkpoint_experiment(cfg, episodes_list, n_runs, n_eval):
+def checkpoint_experiment(cfg, episodes_list, n_runs, n_eval, device='cpu'):
     """Train across multiple training budgets and evaluate each."""
     n_trials = len(episodes_list)
 
@@ -394,7 +414,7 @@ def checkpoint_experiment(cfg, episodes_list, n_runs, n_eval):
             print(f"\n--- Checkpoint: {total_eps} episodes "
                   f"(diverse={ep_diverse}, fixed={ep_fixed}) ---")
 
-            agent, adapter = create_agent(cfg)
+            agent, adapter = create_agent(cfg, device=device)
             train_agent(agent, cfg, ep_diverse, ep_fixed)
 
             results = evaluate_agent(agent, cfg, n_eval)
@@ -424,7 +444,15 @@ def main():
     parser.add_argument("--n-eval", type=int, default=10)
     parser.add_argument("--save-dir", type=str, default=None)
     parser.add_argument("--checkpoint", type=str, default=None)
+    parser.add_argument("--device", type=str, default="cpu",
+                        help="Torch device ('cpu' or 'cuda')")
     args_cli = parser.parse_args()
+
+    import torch
+    device = args_cli.device
+    if device == 'cuda' and not torch.cuda.is_available():
+        print("CUDA not available, falling back to CPU")
+        device = 'cpu'
 
     cfg = NEURAL_HALF_CHEETAH
 
@@ -447,7 +475,7 @@ def main():
         print("VIDEO RECORDING — Loading checkpoint")
         print("=" * 60)
 
-        agent, _ = create_agent(cfg)
+        agent, _ = create_agent(cfg, device=device)
         ckpt = args_cli.checkpoint or os.path.join(
             checkpoint_dir, "checkpoint.pt")
         if not os.path.exists(ckpt):
@@ -501,7 +529,8 @@ def main():
             ep_diverse = 100
             ep_fixed = 200
 
-        agent, adapter = create_agent(cfg)
+        agent, adapter = create_agent(cfg, device=device)
+        print(f"Device: {device}")
         t0 = time.time()
         train_agent(agent, cfg, ep_diverse, ep_fixed)
         train_time = time.time() - t0
@@ -542,7 +571,7 @@ def main():
 
         t0 = time.time()
         avg_rewards, avg_steps = checkpoint_experiment(
-            cfg, episodes, n_runs, n_eval)
+            cfg, episodes, n_runs, n_eval, device=device)
         exp_time = time.time() - t0
         print(f"\nCheckpoint experiment: {exp_time:.0f}s")
 

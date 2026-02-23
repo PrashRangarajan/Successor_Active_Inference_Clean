@@ -315,11 +315,15 @@ NEURAL_HALF_CHEETAH = {
     "train_episodes_diverse": 2000,   # Phase 1: build SF representation
     "train_episodes_fixed": 3000,     # Phase 2: mixed training
     "diverse_fraction": 0.3,
+    "buffer_keep_phase2": 0.3,        # keep 30% of buffer at Phase 1→2
+    "lr_phase2_fraction": 0.5,        # Phase 2 LR = 50% of initial
 
-    # Exploration — faster decay to exploit learned SFs
+    # Exploration — phase-aware epsilon resets
     "epsilon_start": 1.0,
     "epsilon_end": 0.05,
     "epsilon_decay_steps": 100_000,
+    "epsilon_phase2_start": 0.3,
+    "epsilon_phase2_decay_steps": 80_000,
 
     # Test
     "test_max_steps": 1000,
@@ -328,10 +332,10 @@ NEURAL_HALF_CHEETAH = {
     "terminal_bonus": 0.0,
 
     # Eval-specific
-    "eval_n_runs": 3,
+    "eval_n_runs": 5,
     "eval_episodes": [500, 1000, 2000, 3000, 5000],
     "eval_quick_episodes": [500, 1000, 2000],
-    "eval_quick_n_runs": 2,
+    "eval_quick_n_runs": 3,
 }
 
 # =====================================================================
