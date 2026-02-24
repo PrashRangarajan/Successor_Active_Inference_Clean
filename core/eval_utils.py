@@ -199,14 +199,23 @@ def plot_planning_steps_bars(data_dict, save_path, ylabel="Planning Steps"):
 
 
 def plot_planning_cost_bars(n_states, n_clusters, save_path,
-                            ylabel="Planning Operations (MACs)"):
-    """Plot planning cost comparison: Hierarchy (cached) vs Flat (cached).
+                            ylabel="Replanning Cost (MACs)"):
+    """Plot per-decision replanning cost: Hierarchy (k²) vs Flat (N²).
 
-    With cached policies, planning cost per episode is dominated by the
-    matrix–vector product needed to compute the value function:
-    - Flat:      V = M @ C  →  N² multiply-accumulate operations (MACs)
-    - Hierarchy: V_macro = M_macro @ C_macro  →  k² MACs  (micro policies are
-      precomputed dictionary lookups)
+    When an agent must replan (e.g. goal changes, stochastic transition),
+    the cost of one planning decision is a matrix–vector product:
+
+    - **Flat**:      ``V = M @ C``            →  N² MACs
+    - **Hierarchy**: ``V = M_macro @ C_macro`` →  k² MACs
+
+    This comparison shows the *per-decision* advantage of hierarchical
+    planning — the key benefit for replanning, goal transfer, and scaling
+    to large state spaces.
+
+    Note: In a single deterministic episode the flat agent computes
+    ``M @ C`` only once, so total episode cost may actually be lower
+    for flat.  The hierarchy's advantage materialises when replanning
+    is needed (stochastic dynamics, changing goals, online adaptation).
 
     Args:
         n_states: Total number of micro states (N).
@@ -234,12 +243,13 @@ def plot_planning_cost_bars(n_states, n_clusters, save_path,
                 label, ha='center', va='bottom', fontsize=13, fontweight='bold')
 
     # Reduction factor annotation
-    ratio = flat_cost / hier_cost
-    ax.text(0.95, 0.92, f'{ratio:.0f}× reduction',
-            transform=ax.transAxes, ha='right', va='top',
-            fontsize=13, fontstyle='italic',
-            bbox=dict(boxstyle='round,pad=0.3', facecolor='#e8e8e8',
-                      edgecolor='gray', alpha=0.9))
+    if hier_cost > 0:
+        ratio = flat_cost / hier_cost
+        ax.text(0.95, 0.92, f'{ratio:.0f}× reduction',
+                transform=ax.transAxes, ha='right', va='top',
+                fontsize=13, fontstyle='italic',
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='#e8e8e8',
+                          edgecolor='gray', alpha=0.9))
 
     ax.set_xticks(x)
     ax.set_xticklabels(labels, fontsize=14)

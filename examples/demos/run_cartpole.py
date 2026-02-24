@@ -73,8 +73,16 @@ def run_cartpole_example():
         learn_from_experience=True,
     )
 
-    # Set goal: balanced central region
-    agent.set_goal(None, reward=100.0, default_cost=-1.0)
+    # Sparse reward: balanced central region (same pattern as pendulum sparse).
+    # Uses set_shaped_goal so B is NOT made absorbing — the agent retains
+    # correct action-dependent dynamics at the balanced states.
+    C_sparse = adapter.create_sparse_prior(
+        radius=CARTPOLE["sparse_radius"],
+        reward=CARTPOLE["sparse_reward"],
+        default_cost=CARTPOLE["sparse_default_cost"],
+    )
+    agent.set_shaped_goal(C_sparse,
+                          goal_threshold=CARTPOLE["sparse_goal_threshold"])
 
     print(f"Goal states: {len(agent.goal_states)} states "
           f"({100 * len(agent.goal_states) / n_states:.1f}% of state space)")

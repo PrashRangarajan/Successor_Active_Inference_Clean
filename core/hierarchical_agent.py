@@ -164,17 +164,14 @@ class HierarchicalSRAgent(VisualizationMixin):
             sr_episodes = num_episodes - adj_episodes
 
         # Learn or compute transition and successor matrices
-        # Shaped goals: no absorbing states — the reward gradient does the work
-        absorbing = None if self._shaped_goal else self.goal_states
+        # Non-absorbing goal: avoids M(goal,goal) → 1/(1−γ) spike that
+        # drowns the value gradient.  Policy only needs relative V ordering,
+        # which is preserved without the absorbing self-loop.
         if self.learn_from_experience:
             self.B, self.M = self._learn_sr_from_experience(sr_episodes,
-                                                             goal_states=absorbing)
+                                                             goal_states=None)
         else:
             self.B = self.adapter.get_transition_matrix()
-            if absorbing:
-                self.B = self.adapter.normalize_transition_matrix(
-                    self.B, goal_states=absorbing
-                )
             self.M = self.adapter.compute_successor_from_transition(self.B, self.gamma)
 
         if flat_only:
@@ -234,16 +231,12 @@ class HierarchicalSRAgent(VisualizationMixin):
                                delta_episodes // self.adapter.n_actions)
             sr_episodes = delta_episodes - adj_episodes
 
-        # Learn SR incrementally (reuses existing B, M)
-        absorbing = None if self._shaped_goal else self.goal_states
+        # Learn SR incrementally (reuses existing B, M) — non-absorbing
         if self.learn_from_experience:
             self.B, self.M = self._learn_sr_from_experience(
-                sr_episodes, goal_states=absorbing, incremental=True)
+                sr_episodes, goal_states=None, incremental=True)
         else:
             self.B = self.adapter.get_transition_matrix()
-            if absorbing:
-                self.B = self.adapter.normalize_transition_matrix(
-                    self.B, goal_states=absorbing)
             self.M = self.adapter.compute_successor_from_transition(self.B, self.gamma)
 
         if flat_only:
@@ -900,6 +893,8 @@ class HierarchicalSRAgent(VisualizationMixin):
 
         total_steps = 0
         total_reward = 0.0
+        macro_decisions = 0         # k²-cost macro planning decisions
+        micro_phase = False         # N²-cost micro phase computation
 
         s_idx = self.adapter.get_current_state_index()
 
@@ -929,8 +924,11 @@ class HierarchicalSRAgent(VisualizationMixin):
                 break  # No valid macro actions
 
             target_macro = self.adj_list[s_macro][best_macro_action]
+            macro_decisions += 1     # one k²-cost macro planning decision
 
             # Execute macro action (navigate to target macro state)
+            # Note: each macro action also involves an N²-cost bottleneck
+            # policy computation inside _execute_macro_action.
             steps, reward = self._execute_macro_action(s_macro, target_macro, max_steps - total_steps)
             total_steps += steps
             total_reward += reward
@@ -946,6 +944,7 @@ class HierarchicalSRAgent(VisualizationMixin):
         if total_steps < max_steps:
             V = self.adapter.multiply_M_C(self.M, self.C)
             stop_at_goal = not self._shaped_goal
+            micro_phase = True       # one N²-cost computation
 
             while total_steps < max_steps:
                 if stop_at_goal and self._is_at_goal():
@@ -971,6 +970,80 @@ class HierarchicalSRAgent(VisualizationMixin):
             'reward': total_reward,
             'reached_goal': self._is_at_goal(),
             'final_state': self.adapter.get_current_state(),
+            'macro_decisions': macro_decisions,
+            'micro_phase': micro_phase,
+            'planning_steps': macro_decisions + (1 if micro_phase else 0),
+        }
+
+    def run_episode_hierarchical_reentrant(self, max_steps: int = 200) -> Dict[str, Any]:
+        """Hierarchical episode with re-entrant macro control.
+
+        Follows the same global goal policy as flat (``V = M @ C``), but
+        counts each cluster boundary crossing as a macro-level planning
+        decision that the hierarchical agent would need to make.
+
+        This gives an honest macro-decision count for planning-step
+        comparisons.  Not the default episode method — used for analysis
+        figures only.
+        """
+        total_steps = 0
+        total_reward = 0.0
+        macro_decisions = 0
+        micro_phase_used = False
+
+        s_idx = self.adapter.get_current_state_index()
+
+        # Determine goal macro state(s)
+        goal_macro_states = set()
+        for gs in self.goal_states:
+            if gs in self.micro_to_macro:
+                goal_macro_states.add(self.micro_to_macro[gs])
+
+        # Compute goal-level value function once — same policy as flat.
+        V_goal = self.adapter.multiply_M_C(self.M, self.C)
+
+        prev_macro = self.micro_to_macro.get(s_idx)
+
+        while total_steps < max_steps:
+            if not self._shaped_goal and self._is_at_goal():
+                break
+
+            if s_idx not in self.micro_to_macro:
+                break
+
+            s_macro = self.micro_to_macro[s_idx]
+
+            # Count a macro decision whenever we enter a new cluster
+            if s_macro != prev_macro:
+                if s_macro in goal_macro_states:
+                    micro_phase_used = True
+                else:
+                    macro_decisions += 1
+                prev_macro = s_macro
+
+            # Always follow the global goal policy (same trajectory as flat)
+            action = self._select_micro_action(V_goal)
+            n_phys = self._step_with_smooth(action, self.test_smooth_steps)
+            self.current_state = self._get_planning_state()
+            self.state_history.append(self.current_state.copy())
+            self.action_history.append(action)
+            total_steps += n_phys
+
+            s_idx = self.adapter.get_current_state_index()
+            if self.C.ndim == 1:
+                total_reward += self.C[s_idx]
+            else:
+                state = self.adapter.state_space.index_to_state(s_idx)
+                total_reward += self.C[state]
+
+        return {
+            'steps': total_steps,
+            'reward': total_reward,
+            'reached_goal': self._is_at_goal(),
+            'final_state': self.adapter.get_current_state(),
+            'macro_decisions': macro_decisions,
+            'micro_phase': micro_phase_used,
+            'planning_steps': macro_decisions + (1 if micro_phase_used else 0),
         }
 
     def _select_macro_action(self, s_macro: int, V_macro: np.ndarray) -> Optional[int]:
@@ -1181,6 +1254,9 @@ class HierarchicalSRAgent(VisualizationMixin):
             'reward': reward,
             'reached_goal': self._is_at_goal(),
             'final_state': self.adapter.get_current_state(),
+            'macro_decisions': 0,     # flat has no macro decisions
+            'micro_phase': True,      # flat is entirely micro
+            'planning_steps': steps,  # flat plans every step (each N²)
         }
 
     # ==================== Policy Compilation ====================
@@ -1287,6 +1363,8 @@ class HierarchicalSRAgent(VisualizationMixin):
         """Run hierarchical episode using precompiled policy tables (O(1) per step)."""
         total_steps = 0
         total_reward = 0.0
+        macro_decisions = 0         # macro-level planning decisions
+        micro_phase = False         # micro phase used
 
         goal_macro_states = set()
         for gs in self.goal_states:
@@ -1306,6 +1384,7 @@ class HierarchicalSRAgent(VisualizationMixin):
             if best_macro is None:
                 break
             target_macro = self.adj_list[s_macro][best_macro]
+            macro_decisions += 1     # one macro planning decision (O(1) cached)
 
             # Navigate to bottleneck using cached bottleneck policy
             bn_policy = self._bottleneck_policies.get((s_macro, target_macro))
@@ -1343,6 +1422,8 @@ class HierarchicalSRAgent(VisualizationMixin):
                 break
 
         # Micro phase: navigate to exact goal using cached goal policy
+        if total_steps < max_steps and not self._is_at_goal():
+            micro_phase = True       # micro phase uses cached goal policy (O(1))
         while total_steps < max_steps and not self._is_at_goal():
             s_idx = self.adapter.get_current_state_index()
             action = self._goal_policy.get(s_idx, 0)  # O(1) lookup
@@ -1360,6 +1441,9 @@ class HierarchicalSRAgent(VisualizationMixin):
             'reward': total_reward,
             'reached_goal': self._is_at_goal(),
             'final_state': self.adapter.get_current_state(),
+            'macro_decisions': macro_decisions,
+            'micro_phase': micro_phase,
+            'planning_steps': macro_decisions + (1 if micro_phase else 0),
         }
 
     def _run_episode_flat_cached(self, max_steps: int) -> Dict[str, Any]:
@@ -1384,6 +1468,9 @@ class HierarchicalSRAgent(VisualizationMixin):
             'reward': reward,
             'reached_goal': self._is_at_goal(),
             'final_state': self.adapter.get_current_state(),
+            'macro_decisions': 0,     # flat has no macro decisions
+            'micro_phase': True,      # flat is entirely micro
+            'planning_steps': steps,  # flat plans every step (each N²)
         }
 
     # ==================== Policy Save / Load ====================

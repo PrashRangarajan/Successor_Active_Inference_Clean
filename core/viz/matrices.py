@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.patheffects as PathEffects
 from matplotlib.patches import Ellipse
-from matplotlib.colors import LogNorm, PowerNorm, ListedColormap, BoundaryNorm
+from matplotlib.colors import ListedColormap, BoundaryNorm
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from typing import Optional, List
 
@@ -178,11 +178,6 @@ class MatrixVizMixin(object):
 
             aug_labels = ["✗ Without key", "★ With key"] if n_augment == 2 else [f"Aug {i}" for i in range(n_augment)]
 
-            # Find global max for consistent color scaling
-            global_max = max(M[origin_state, i, :, j].max()
-                           for i in range(n_augment) for j in range(n_augment))
-            global_max = global_max if global_max > 0 else 1
-
             for origin_aug in range(n_augment):
                 for target_aug in range(n_augment):
                     ax = axes[origin_aug, target_aug] if n_augment > 1 else axes
@@ -190,8 +185,7 @@ class MatrixVizMixin(object):
                     # M[origin_loc, origin_aug, target_loc, target_aug]
                     M_slice = M[origin_state, origin_aug, :, target_aug].reshape(grid_size, grid_size).T
 
-                    im = ax.imshow(M_slice, aspect='equal', cmap='copper',
-                                   norm=LogNorm(vmin=0.01, vmax=global_max))
+                    im = ax.imshow(M_slice, aspect='equal', cmap='copper')
                     # ax.set_title(f'{aug_labels[origin_aug]} \u2192 {aug_labels[target_aug]}', fontsize=12)
                     ax.set_xticks(np.arange(grid_size))
                     ax.set_yticks(np.arange(grid_size))
@@ -209,9 +203,7 @@ class MatrixVizMixin(object):
             M_orig = M[origin_state, :].reshape(grid_size, grid_size).T
 
             plt.figure(figsize=(8, 8))
-            vmax = M_orig.max() if M_orig.max() > 0 else 1
-            plt.imshow(M_orig, aspect='equal', cmap='copper',
-                       norm=LogNorm(vmin=0.01, vmax=vmax))
+            plt.imshow(M_orig, aspect='equal', cmap='copper')
             plt.colorbar()
             # plt.title(f'Successor Representation from ({origin_x},{origin_y})', fontsize=14)
             plt.xticks(np.arange(grid_size), fontsize=12)
@@ -484,29 +476,38 @@ class MatrixVizMixin(object):
             base_n_states = grid_size * grid_size
             is_augmented = n_states != base_n_states
 
-            inset = inset_axes(ax, width="25%", height="25%", loc='lower right',
-                               borderpad=1.5)
+            cmap_in, norm_in = self._cluster_cmap_and_norm()
 
             if is_augmented:
-                # Show has_key=0 panel as thumbnail
-                aug_labels = np.ones(base_n_states) * self.n_clusters
-                for micro_idx, macro_idx in self.micro_to_macro.items():
-                    state = self.adapter.state_space.index_to_state(micro_idx)
-                    if len(state) == 2:
-                        base_idx, aug_idx = state
-                        if aug_idx == 0:
-                            aug_labels[base_idx] = macro_idx
-                labels_grid = aug_labels.reshape(grid_size, grid_size).T
+                # Side-by-side 1×2 inset: without key | with key
+                inset = inset_axes(ax, width="40%", height="22%", loc='lower right',
+                                   borderpad=1.2)
+                panels = []
+                for aug_val in (0, 1):
+                    aug_labels = np.ones(base_n_states) * self.n_clusters
+                    for micro_idx, macro_idx in self.micro_to_macro.items():
+                        state = self.adapter.state_space.index_to_state(micro_idx)
+                        if len(state) == 2:
+                            base_idx, ai = state
+                            if ai == aug_val:
+                                aug_labels[base_idx] = macro_idx
+                    panels.append(aug_labels.reshape(grid_size, grid_size).T)
+                combined = np.hstack(panels)
+                inset.imshow(combined, cmap=cmap_in, norm=norm_in)
+                inset.set_xticks([grid_size * 0.5, grid_size * 1.5])
+                inset.set_xticklabels(['✗', '★'], fontsize=7)
+                inset.set_yticks([])
+                inset.tick_params(length=0)
             else:
+                inset = inset_axes(ax, width="25%", height="25%", loc='lower right',
+                                   borderpad=1.5)
                 labels_arr = np.ones(n_states) * self.n_clusters
                 for micro_idx, macro_idx in self.micro_to_macro.items():
                     labels_arr[micro_idx] = macro_idx
                 labels_grid = labels_arr.reshape(grid_size, grid_size).T
-
-            cmap_in, norm_in = self._cluster_cmap_and_norm()
-            inset.imshow(labels_grid, cmap=cmap_in, norm=norm_in)
-            inset.set_xticks([])
-            inset.set_yticks([])
+                inset.imshow(labels_grid, cmap=cmap_in, norm=norm_in)
+                inset.set_xticks([])
+                inset.set_yticks([])
 
         plt.savefig(f'{save_dir}/macro_state_viz_ellipses.png', bbox_inches='tight')
         plt.close()
@@ -794,7 +795,7 @@ class MatrixVizMixin(object):
                     V.reshape(grid_size, grid_size).T,
                 )
                 ax_b.set_facecolor('white')
-                ax_b.imshow(V_grid, cmap='viridis')
+                ax_b.imshow(V_grid, cmap='copper')
                 ax_b.set_xticks(np.arange(grid_size))
                 ax_b.set_yticks(np.arange(grid_size))
         else:
@@ -877,22 +878,31 @@ class MatrixVizMixin(object):
             # Inset cluster thumbnail
             if hasattr(self.adapter, 'grid_size'):
                 cmap_in_d, norm_in_d = self._cluster_cmap_and_norm()
-                inset = inset_axes(ax_d, width="22%", height="22%", loc='lower right',
-                                   borderpad=1.0)
                 if is_augmented_c:
-                    aug_labels_in = np.ones(n_base) * self.n_clusters
-                    for micro_idx, macro_idx in self.micro_to_macro.items():
-                        state = self.adapter.state_space.index_to_state(micro_idx)
-                        if len(state) == 2:
-                            base_idx, aug_idx = state
-                            if aug_idx == 0:
-                                aug_labels_in[base_idx] = macro_idx
-                    inset.imshow(aug_labels_in.reshape(grid_size, grid_size).T,
-                                 cmap=cmap_in_d, norm=norm_in_d)
+                    inset = inset_axes(ax_d, width="36%", height="20%",
+                                       loc='lower right', borderpad=0.8)
+                    panels_d = []
+                    for aug_val in (0, 1):
+                        aug_labels_in = np.ones(n_base) * self.n_clusters
+                        for micro_idx, macro_idx in self.micro_to_macro.items():
+                            state = self.adapter.state_space.index_to_state(micro_idx)
+                            if len(state) == 2:
+                                base_idx, ai = state
+                                if ai == aug_val:
+                                    aug_labels_in[base_idx] = macro_idx
+                        panels_d.append(aug_labels_in.reshape(grid_size, grid_size).T)
+                    combined_d = np.hstack(panels_d)
+                    inset.imshow(combined_d, cmap=cmap_in_d, norm=norm_in_d)
+                    inset.set_xticks([grid_size * 0.5, grid_size * 1.5])
+                    inset.set_xticklabels(['✗', '★'], fontsize=6)
+                    inset.set_yticks([])
+                    inset.tick_params(length=0)
                 else:
+                    inset = inset_axes(ax_d, width="22%", height="22%",
+                                       loc='lower right', borderpad=1.0)
                     inset.imshow(labels_grid, cmap=cmap_in_d, norm=norm_in_d)
-                inset.set_xticks([])
-                inset.set_yticks([])
+                    inset.set_xticks([])
+                    inset.set_yticks([])
         else:
             ax_d.text(0.5, 0.5, 'No spectral data', ha='center', va='center',
                       transform=ax_d.transAxes, fontsize=14)
@@ -942,8 +952,8 @@ class MatrixVizMixin(object):
                         wall_mask_base[wi] = True
 
             result['is_grid'] = True
-            result['label0'] = 'x'
-            result['label1'] = 'y'
+            result['label0'] = ''
+            result['label1'] = ''
             result['extent'] = None
 
             if is_augmented:
@@ -1132,26 +1142,6 @@ class MatrixVizMixin(object):
                          for j in range(n1)])
         return px0, px1
 
-    @staticmethod
-    def _value_norm(data):
-        """Return a PowerNorm that compresses dynamic range for value heatmaps.
-
-        V values typically span several orders of magnitude (e.g. -0.1 to 9000)
-        so a linear colourscale makes everything look black.  PowerNorm(gamma=0.4)
-        stretches the low end and compresses the high end, revealing structure.
-
-        Returns:
-            (norm, vmin, vmax) tuple.  *norm* is None if the data is constant.
-        """
-        arr = np.ma.asarray(data) if isinstance(data, np.ma.MaskedArray) else np.asarray(data)
-        vals = arr.compressed() if isinstance(arr, np.ma.MaskedArray) and arr.mask is not np.ma.nomask else arr.ravel()
-        if vals.size == 0:
-            return None, 0, 1
-        vmin = float(max(0.0, np.nanmin(vals)))
-        vmax = float(np.nanmax(vals))
-        if vmax <= vmin:
-            return None, vmin, vmin + 1
-        return PowerNorm(gamma=0.4, vmin=vmin, vmax=vmax), vmin, vmax
 
     def _draw_landmarks(self, ax, aug_idx=None):
         """Draw goal and key markers on a grid-based plot.
@@ -1191,9 +1181,6 @@ class MatrixVizMixin(object):
     def _draw_value_heatmap(self, ax, vg, fig=None):
         """Draw value function heatmap on the given axes.
 
-        Uses PowerNorm(gamma=0.4) to compress the wide dynamic range typical
-        of SR value functions, making spatial gradients visible.
-
         Args:
             ax: Matplotlib axes
             vg: dict from _build_value_grid()
@@ -1201,11 +1188,9 @@ class MatrixVizMixin(object):
         Returns:
             The imshow image object
         """
-        norm, vmin, vmax = self._value_norm(vg['V_2d'])
-
         if vg['is_grid']:
             ax.set_facecolor('white')
-            im = ax.imshow(vg['V_2d'], cmap='copper', norm=norm)
+            im = ax.imshow(vg['V_2d'], cmap='copper')
             if hasattr(self.adapter, 'grid_size'):
                 gs = self.adapter.grid_size
                 ax.set_xticks(np.arange(gs))
@@ -1213,7 +1198,7 @@ class MatrixVizMixin(object):
         else:
             im = ax.imshow(
                 vg['V_2d'].T, origin='lower', aspect='auto',
-                extent=vg['extent'], cmap='copper', norm=norm,
+                extent=vg['extent'], cmap='copper',
             )
             # Subsampled tick labels — placed at *pixel* centres so they
             # align with the heatmap cells (important for non-uniform bins).
@@ -1255,9 +1240,19 @@ class MatrixVizMixin(object):
 
         if vg['is_grid']:
             # Grid: black arrows with white stroke for visibility on any bg
+            # Skip goal cells — the agent has already arrived
+            goal_cells = set()
+            if hasattr(self, 'goal_states'):
+                for gs_idx in self.goal_states:
+                    rendered = self.adapter.render_state(gs_idx)
+                    # rendered is (x, y) or (x, y, has_key); grid is (row=y, col=x)
+                    goal_cells.add((rendered[1], rendered[0]))
+
             grid_arrows = {0: (-1, 0), 1: (1, 0), 2: (0, -1), 3: (0, 1)}
             for r in range(rows):
                 for c in range(cols):
+                    if (r, c) in goal_cells:
+                        continue
                     a = policy_2d[r, c]
                     if a < 0 or a not in grid_arrows:
                         continue
@@ -1369,16 +1364,15 @@ class MatrixVizMixin(object):
         # Augmented grid: multi-panel
         if vg.get('is_augmented') and vg.get('V_panels'):
             panels = vg['V_panels']
-            # Shared PowerNorm across panels for consistent colour mapping
-            all_vals = np.concatenate([p[0].ravel() for p in panels])
-            norm, _, _ = self._value_norm(all_vals)
+            vmin = min(p[0].min() for p in panels)
+            vmax = max(p[0].max() for p in panels)
 
             fig, axes = plt.subplots(1, len(panels), figsize=(6 * len(panels), 5))
             if len(panels) == 1:
                 axes = [axes]
             for idx, (ax, (V_panel, title)) in enumerate(zip(axes, panels)):
                 ax.set_facecolor('white')
-                im = ax.imshow(V_panel, cmap='copper', norm=norm)
+                im = ax.imshow(V_panel, cmap='copper', vmin=vmin, vmax=vmax)
                 ax.set_title(title, fontsize=12)
                 if hasattr(self.adapter, 'grid_size'):
                     gs = self.adapter.grid_size
@@ -1390,7 +1384,7 @@ class MatrixVizMixin(object):
             fig, ax = plt.subplots(figsize=(8, 6))
             im = self._draw_value_heatmap(ax, vg, fig)
             self._draw_landmarks(ax)
-            fig.colorbar(im, ax=ax, label='Value (V = M\u00b7C)')
+            fig.colorbar(im, ax=ax, label='Value')
             if vg['avg_note']:
                 ax.set_title(vg['avg_note'], fontsize=10, style='italic')
 
@@ -1493,7 +1487,7 @@ class MatrixVizMixin(object):
         im = self._draw_value_heatmap(ax, vg, fig)
         self._draw_policy_arrows(ax, vg, pg)
         self._draw_landmarks(ax)
-        fig.colorbar(im, ax=ax, label='Value (V = M\u00b7C)')
+        fig.colorbar(im, ax=ax, label='Value')
 
         if vg.get('avg_note'):
             ax.set_title(vg['avg_note'], fontsize=10, style='italic')

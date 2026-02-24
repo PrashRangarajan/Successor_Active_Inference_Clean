@@ -63,11 +63,11 @@ KEY_GRIDWORLD = {
 MOUNTAINCAR = {
     "n_pos_bins": 10,
     "n_vel_bins": 10,
-    "n_clusters": 6,
+    "n_clusters": 5,
     "gamma": 0.95,
     "learning_rate": 0.05,
     "learn_from_experience": True,
-    "train_episodes": 6000,
+    "train_episodes": 5000,
     "test_max_steps": 500,
     "train_smooth_steps": 10,
     "test_smooth_steps": 1,
@@ -168,13 +168,53 @@ CARTPOLE = {
     "train_episodes": 6000,
     "test_max_steps": 500,
 
-    # Agent
-    "reward": 100.0,
-    "default_cost": -1.0,
+    # Sparse reward (survival task — same pattern as pendulum sparse)
+    "sparse_radius": 0.5,
+    "sparse_reward": 10.0,
+    "sparse_default_cost": -0.1,
+    "sparse_goal_threshold": 0.0,
 
     # Eval-specific
     "eval_n_runs": 5,
     "eval_episodes": [1000, 2000, 4000, 6000, 8000, 10000],
+    "eval_quick_episodes": [1000, 4000, 8000],
+    "eval_quick_n_runs": 2,
+}
+
+# =====================================================================
+# PointMaze (gymnasium-robotics)
+# =====================================================================
+POINTMAZE = {
+    "n_x_bins": 20,
+    "n_y_bins": 20,
+    "n_clusters": 4,            # UMaze has ~3-4 natural rooms
+    "gamma": 0.95,
+    "learning_rate": 0.05,
+    "learn_from_experience": True,
+    "train_episodes": 5000,
+    "test_max_steps": 5000,
+
+    # Smooth stepping: the point mass moves ~0.0024 units/physics-step.
+    # With 20 bins over 5 units, each bin is 0.25 units -> need ~100 steps
+    # to cross one bin.  _step_with_smooth breaks early once the discrete
+    # state changes.
+    # Train: 200 gives margin for exploration.
+    # Test:  100 so each action covers ~1 bin.  With max_steps=5000
+    #        the agent gets ~50 actions = ~12 units of movement, enough
+    #        to traverse the U-maze (~6 units path length).
+    "train_smooth_steps": 200,
+    "test_smooth_steps": 100,
+
+    # Agent
+    "reward": 100.0,
+    "default_cost": -1.0,
+
+    # Maze variant
+    "maze_id": "PointMaze_UMaze-v3",
+
+    # Eval-specific
+    "eval_n_runs": 5,
+    "eval_episodes": [500, 1000, 2000, 4000, 6000, 8000],
     "eval_quick_episodes": [1000, 4000, 8000],
     "eval_quick_n_runs": 2,
 }

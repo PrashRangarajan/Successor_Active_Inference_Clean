@@ -96,10 +96,19 @@ def run_mountain_car_example():
     print(f"Flat: {result_flat['steps']} steps, reached goal: {result_flat['reached_goal']}")
 
     # Planning steps comparison bar chart
+    # Use re-entrant method for honest macro-decision count: if the agent
+    # leaves a goal cluster during micro navigation, it re-enters macro
+    # planning (each cluster transition = a planning decision).
     from collections import OrderedDict
+    agent.reset_episode(init_state=init_state)
+    result_reentrant = agent.run_episode_hierarchical_reentrant(max_steps=500)
+    print(f"Reentrant: {result_reentrant['steps']} steps, "
+          f"macro_decisions={result_reentrant['macro_decisions']}, "
+          f"planning_steps={result_reentrant['planning_steps']}")
+
     steps_data = OrderedDict([
-        ("Hierarchy", result['steps']),
-        ("Flat", result_flat['steps']),
+        ("Hierarchy", result_reentrant['planning_steps']),
+        ("Flat", result_flat['planning_steps']),
     ])
     plot_planning_steps_bars(steps_data,
                              save_path="figures/mountaincar/planning_steps.png")
