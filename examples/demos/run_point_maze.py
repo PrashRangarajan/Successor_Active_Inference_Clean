@@ -32,10 +32,14 @@ def run_point_maze_example():
     n_clusters = POINTMAZE["n_clusters"]
 
     # Create gymnasium-robotics environment
+    # continuing_task=False so that Gym returns terminated=True when the
+    # ball reaches the goal.  This lets _step_with_smooth stop immediately
+    # rather than overshooting.
     env = gym.make(
         POINTMAZE["maze_id"],
         render_mode="rgb_array",
         max_episode_steps=500,
+        continuing_task=False,
     )
 
     # Wrap with adapter
@@ -55,9 +59,14 @@ def run_point_maze_example():
         test_smooth_steps=POINTMAZE["test_smooth_steps"],
     )
 
-    # Set goal — PointMaze picks a random goal on reset.
-    # Reset first to populate desired_goal.
-    adapter.reset()
+    # Set goal in the bottom-left room (far from start in top-left)
+    # to guarantee the hierarchy has to navigate through the corridor.
+    # goal_cell=[3, 1] places the goal in maze row 3, col 1.
+    # We pass this to ALL future resets so the Gym rendering shows the
+    # correct red goal marker.
+    goal_cell = np.array([3, 1])
+    goal_options = {"goal_cell": goal_cell}
+    adapter.reset(reset_options=goal_options)
     goal = adapter._desired_goal
     print(f"\nGoal location: ({goal[0]:.2f}, {goal[1]:.2f})")
     agent.set_goal(None, reward=POINTMAZE["reward"],
@@ -69,15 +78,16 @@ def run_point_maze_example():
     print("=" * 50)
     agent.learn_environment(num_episodes=POINTMAZE["train_episodes"])
 
-    # Run test episodes from a fixed start position (top-left room)
-    # so results are comparable across runs.
-    test_start = [-1.5, 1.5]  # UMaze cell (row=1, col=1)
+    # Run test episodes from a fixed start position (top-left room).
+    # Use a bin CENTER to avoid landing on wall boundaries.
+    # Bin (4, 15) center = (-1.375, 1.375) — top-left navigable bin.
+    test_start = [-1.375, 1.375]
     print(f"\nTest start position: ({test_start[0]}, {test_start[1]})")
 
     print("\n" + "=" * 50)
     print("TEST PHASE - Hierarchical Policy")
     print("=" * 50)
-    adapter.reset(init_state=test_start)
+    adapter.reset(init_state=test_start, reset_options=goal_options)
     agent.current_state = agent._get_planning_state()
     result = agent.run_episode_hierarchical(max_steps=POINTMAZE["test_max_steps"])
     print(f"  Steps: {result['steps']}, Reached goal: {result['reached_goal']}, "
@@ -86,7 +96,7 @@ def run_point_maze_example():
     print("\n" + "=" * 50)
     print("TEST PHASE - Flat Policy")
     print("=" * 50)
-    adapter.reset(init_state=test_start)
+    adapter.reset(init_state=test_start, reset_options=goal_options)
     agent.current_state = agent._get_planning_state()
     result_flat = agent.run_episode_flat(max_steps=POINTMAZE["test_max_steps"])
     print(f"  Steps: {result_flat['steps']}, Reached goal: {result_flat['reached_goal']}")
@@ -99,7 +109,7 @@ def run_point_maze_example():
 
     # Planning steps comparison
     from collections import OrderedDict
-    adapter.reset(init_state=test_start)
+    adapter.reset(init_state=test_start, reset_options=goal_options)
     agent.current_state = agent._get_planning_state()
     result_reentrant = agent.run_episode_hierarchical_reentrant(
         max_steps=POINTMAZE["test_max_steps"],
@@ -138,8 +148,11 @@ def run_point_maze_example():
     agent.visualize_clusters(save_dir="figures/pointmaze/clustering")
 
     # Maze-aware cluster plot (shows walls + cluster coloring)
+    # Pass the original goal so the star appears at the correct location,
+    # even though adapter._desired_goal may have changed during later resets.
     adapter.plot_clusters_on_maze(
         agent, save_path="figures/pointmaze/maze_clusters.png",
+        goal_xy=goal,
     )
 
     agent.plot_macro_action_heatmap(
@@ -160,13 +173,13 @@ def run_point_maze_example():
     print("=" * 50)
 
     # Start from top-left room (far from goal) for a meaningful trajectory.
-    # UMaze cell (row=1, col=1) → x = 1 - 2.5 = -1.5, y = 2.5 - 1 = 1.5
-    start_xy = [-1.5, 1.5]
+    # Use a bin center to avoid wall boundaries.
+    start_xy = [-1.375, 1.375]
     print(f"  Tracking start: ({start_xy[0]}, {start_xy[1]})")
 
     frames, x_positions, y_positions, actions = run_episode_with_tracking(
         agent, adapter, max_steps=POINTMAZE["test_max_steps"],
-        start_position=start_xy,
+        start_position=start_xy, reset_options=goal_options,
     )
     print(f"  Trajectory: {len(actions)} actions, {len(frames)} frames, "
           f"reached goal: {agent._is_at_goal()}")
@@ -214,17 +227,18 @@ def run_point_maze_example():
 
 
 def run_episode_with_tracking(agent, adapter, max_steps=300,
-                               start_position=None):
-    """Run an episode capturing frames and (x, y) positions.
+                               start_position=None, reset_options=None):
+    """Run an episode using the HIERARCHICAL policy while capturing frames.
 
-    Uses the agent's flat policy for consistent trajectory recording.
+    Mirrors agent.run_episode_hierarchical() but records (x, y) positions
+    and rendered frames at each micro step for video generation.
 
     Args:
         agent: Trained HierarchicalSRAgent.
         adapter: PointMazeAdapter.
         max_steps: Maximum physics steps.
-        start_position: Optional [x, y] start position. If None, uses
-            Gym's random initialization.
+        start_position: Optional [x, y] start position.
+        reset_options: Optional dict forwarded to env.reset() (e.g. goal_cell).
 
     Returns:
         (frames, x_positions, y_positions, actions_taken) tuple.
@@ -234,34 +248,90 @@ def run_episode_with_tracking(agent, adapter, max_steps=300,
     y_positions = []
     actions_taken = []
 
-    adapter.reset(init_state=start_position)
+    adapter.reset(init_state=start_position, reset_options=reset_options)
     agent.current_state = agent._get_planning_state()
-    V = adapter.multiply_M_C(agent.M, agent.C)
     steps = 0
 
-    while steps < max_steps and not agent._is_at_goal():
+    def _capture():
+        """Capture current frame and position."""
         obs = adapter.get_current_obs()
         x_positions.append(float(obs[0]))
         y_positions.append(float(obs[1]))
-
         frame = adapter.env.render()
         if frame is not None:
             frames.append(frame)
 
-        action = agent._select_micro_action(V)
+    def _step_with_capture(action):
+        """Execute one micro action with frame capture."""
+        nonlocal steps
+        _capture()
         actions_taken.append(action)
-
         n_phys = agent._step_with_smooth(action, agent.test_smooth_steps)
         agent.current_state = agent._get_planning_state()
         steps += n_phys
 
-    # Final state
-    obs = adapter.get_current_obs()
-    x_positions.append(float(obs[0]))
-    y_positions.append(float(obs[1]))
-    frame = adapter.env.render()
-    if frame is not None:
-        frames.append(frame)
+    # ---- Macro phase: navigate room-to-room ----
+    s_idx = adapter.get_current_state_index()
+
+    goal_macro_states = set()
+    for gs in agent.goal_states:
+        if gs in agent.micro_to_macro:
+            goal_macro_states.add(agent.micro_to_macro[gs])
+
+    while steps < max_steps:
+        if s_idx not in agent.micro_to_macro:
+            break
+        s_macro = agent.micro_to_macro[s_idx]
+        if s_macro in goal_macro_states:
+            break
+
+        V_macro = agent.M_macro @ agent.C_macro
+        best_macro_action = agent._select_macro_action(s_macro, V_macro)
+        if best_macro_action is None:
+            break
+
+        target_macro = agent.adj_list[s_macro][best_macro_action]
+
+        # Execute macro action (navigate toward bottleneck / target cluster)
+        bottleneck = agent.bottleneck_states.get((s_macro, target_macro), [])
+        if not bottleneck:
+            bottleneck = agent.macro_state_list[target_macro]
+        if not bottleneck:
+            break
+
+        C_temp = adapter.create_goal_prior(bottleneck, reward=10.0, default_cost=0.0)
+        V_temp = adapter.multiply_M_C(agent.M, C_temp)
+
+        while steps < max_steps:
+            s_idx = adapter.get_current_state_index()
+            if s_idx in bottleneck or agent._is_at_goal():
+                break
+            if s_idx in agent.micro_to_macro:
+                current_macro = agent.micro_to_macro[s_idx]
+                if current_macro == target_macro:
+                    break
+                if current_macro != s_macro:
+                    break
+
+            action = agent._select_micro_action(V_temp)
+            _step_with_capture(action)
+
+        s_idx = adapter.get_current_state_index()
+        if agent._is_at_goal():
+            break
+
+    # ---- Micro phase: fine-grained navigation to exact goal ----
+    if steps < max_steps and not agent._is_at_goal():
+        V = adapter.multiply_M_C(agent.M, agent.C)
+
+        while steps < max_steps:
+            if agent._is_at_goal():
+                break
+            action = agent._select_micro_action(V)
+            _step_with_capture(action)
+
+    # Final state capture
+    _capture()
 
     return frames, x_positions, y_positions, actions_taken
 

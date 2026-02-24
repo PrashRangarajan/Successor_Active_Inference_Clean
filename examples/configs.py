@@ -212,11 +212,46 @@ POINTMAZE = {
     # Maze variant
     "maze_id": "PointMaze_UMaze-v3",
 
+    # Replanning experiment: 5 sequential goals across all rooms of UMaze
+    "replan_goals": [
+        {"cell": [3, 1], "label": "Bottom-left"},
+        {"cell": [1, 3], "label": "Top-right"},
+        {"cell": [3, 3], "label": "Bottom-right"},
+        {"cell": [1, 1], "label": "Top-left"},
+        {"cell": [2, 3], "label": "U-bend"},
+    ],
+
     # Eval-specific
     "eval_n_runs": 5,
     "eval_episodes": [500, 1000, 2000, 4000, 6000, 8000],
     "eval_quick_episodes": [1000, 4000, 8000],
     "eval_quick_n_runs": 2,
+}
+
+# =====================================================================
+# PointMaze — Medium (8×8 grid, ~416 navigable bins)
+# =====================================================================
+POINTMAZE_MEDIUM = {
+    **POINTMAZE,
+    "n_x_bins": 32,             # 8 cols × 4 bins/cell
+    "n_y_bins": 32,             # 8 rows × 4 bins/cell
+    "n_clusters": 8,            # Medium has ~6-8 natural rooms
+    "train_episodes": 8000,     # More states to cover
+    "test_max_steps": 10000,    # Longer paths
+    "maze_id": "PointMaze_Medium-v3",
+}
+
+# =====================================================================
+# PointMaze — Large (9×12 grid, ~414 navigable bins)
+# =====================================================================
+POINTMAZE_LARGE = {
+    **POINTMAZE,
+    "n_x_bins": 36,             # 12 cols × 3 bins/cell
+    "n_y_bins": 27,             # 9 rows × 3 bins/cell
+    "n_clusters": 10,           # Large has many rooms/corridors
+    "train_episodes": 15000,    # Complex maze needs more exploration
+    "test_max_steps": 20000,    # Longest paths in the maze
+    "maze_id": "PointMaze_Large-v3",
 }
 
 # =====================================================================

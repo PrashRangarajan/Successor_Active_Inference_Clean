@@ -476,16 +476,35 @@ class TrajectoryVizMixin(object):
             search_start = max(1, T // 2)
 
             if hasattr(self.adapter, 'discretize_obs') and hasattr(self, 'goal_states'):
-                for k in range(search_start, T):
-                    obs_k = np.array([pos[k], vel[k]])
-                    try:
-                        disc = self.adapter.discretize_obs(obs_k)
-                        s_idx = self.adapter.state_space.state_to_index(disc)
-                        if s_idx in self.goal_states:
-                            goal_arrival = k
-                            break
-                    except Exception:
-                        pass
+                # First check: does the adapter have a continuous terminal check?
+                # If so, find the last frame satisfying it (the actual stopping
+                # point), which is more meaningful than the first goal-bin entry.
+                if hasattr(self.adapter, 'is_terminal'):
+                    for k in range(T - 1, search_start - 1, -1):
+                        saved_obs = getattr(self.adapter, '_current_obs', None)
+                        try:
+                            self.adapter._current_obs = np.array([pos[k], vel[k]])
+                            if self.adapter.is_terminal() is True:
+                                goal_arrival = k
+                                break
+                        except Exception:
+                            pass
+                        finally:
+                            if saved_obs is not None:
+                                self.adapter._current_obs = saved_obs
+
+                # Fallback: first frame entering a goal bin
+                if goal_arrival is None:
+                    for k in range(search_start, T):
+                        obs_k = np.array([pos[k], vel[k]])
+                        try:
+                            disc = self.adapter.discretize_obs(obs_k)
+                            s_idx = self.adapter.state_space.state_to_index(disc)
+                            if s_idx in self.goal_states:
+                                goal_arrival = k
+                                break
+                        except Exception:
+                            pass
 
             if goal_arrival is None:
                 for k in range(search_start, T):
@@ -1073,14 +1092,23 @@ class TrajectoryVizMixin(object):
         arrow_dx = {}
         noop_actions = set()
         for i in range(n_actions):
-            label_lower = action_labels[i].lower()
-            if 'left' in label_lower:
+            label_lower = action_labels[i].lower().strip()
+            # Check diagonals FIRST (before cardinals, since "ne" contains "e")
+            if label_lower.endswith('ne') or 'northeast' in label_lower:
+                arrow_dx[i] = (1, 1)
+            elif label_lower.endswith('nw') or 'northwest' in label_lower:
+                arrow_dx[i] = (-1, 1)
+            elif label_lower.endswith('se') or 'southeast' in label_lower:
+                arrow_dx[i] = (1, -1)
+            elif label_lower.endswith('sw') or 'southwest' in label_lower:
+                arrow_dx[i] = (-1, -1)
+            elif 'left' in label_lower or label_lower.endswith(' w') or label_lower.endswith(' w)'):
                 arrow_dx[i] = (-1, 0)
-            elif 'right' in label_lower:
+            elif 'right' in label_lower or label_lower.endswith(' e') or label_lower.endswith(' e)'):
                 arrow_dx[i] = (1, 0)
-            elif 'up' in label_lower:
+            elif 'up' in label_lower or label_lower.endswith(' n') or label_lower.endswith(' n)'):
                 arrow_dx[i] = (0, 1)
-            elif 'down' in label_lower:
+            elif 'down' in label_lower or label_lower.endswith(' s') or label_lower.endswith(' s)'):
                 arrow_dx[i] = (0, -1)
             else:
                 noop_actions.add(i)
@@ -1198,12 +1226,20 @@ class TrajectoryVizMixin(object):
                         color=cluster_colors[c], alpha=0.5,
                         label=f'Cluster {c}'))
                 # Action symbols
+                # Map arrow directions to distinct LaTeX symbols
+                _arrow_sym = {
+                    (1, 0): r'$\rightarrow$',
+                    (-1, 0): r'$\leftarrow$',
+                    (0, 1): r'$\uparrow$',
+                    (0, -1): r'$\downarrow$',
+                    (1, 1): r'$\nearrow$',
+                    (-1, 1): r'$\nwarrow$',
+                    (1, -1): r'$\searrow$',
+                    (-1, -1): r'$\swarrow$',
+                }
                 for i in range(n_actions):
                     if i in arrow_dx:
-                        sym = (r'$\rightarrow$' if arrow_dx[i][0] > 0
-                               else (r'$\leftarrow$' if arrow_dx[i][0] < 0
-                               else (r'$\uparrow$' if arrow_dx[i][1] > 0
-                               else r'$\downarrow$')))
+                        sym = _arrow_sym.get(arrow_dx[i], '.')
                         legend_handles.append(plt.Line2D(
                             [0], [0], marker=sym,
                             color='w', markerfacecolor='black', markersize=10,

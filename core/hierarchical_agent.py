@@ -856,6 +856,12 @@ class HierarchicalSRAgent(VisualizationMixin):
             s_after = self.adapter.get_current_state_index()
             if s_after != s_before:
                 return i + 1
+            # Stop immediately when the continuous state reaches the goal
+            # (e.g. within 0.45 units for PointMaze).  Without this check
+            # the ball can overshoot the goal during the remaining sub-steps.
+            terminal = self.adapter.is_terminal()
+            if terminal is True:
+                return i + 1
         return smooth_steps
 
     def reset_episode(self, init_state: Optional[Any] = None):
