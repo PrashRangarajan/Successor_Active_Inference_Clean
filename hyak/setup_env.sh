@@ -12,7 +12,10 @@ conda activate neural_sr
 pip install torch numpy scipy matplotlib scikit-learn
 pip install gymnasium imageio imageio-ffmpeg
 
-# MuJoCo (for HalfCheetah)
+# MuJoCo (for HalfCheetah, InvertedPendulum)
 pip install mujoco gymnasium[mujoco]
+
+# gymnasium-robotics (for PointMaze)
+pip install gymnasium-robotics
 
 echo "Environment 'neural_sr' ready. Activate with: conda activate neural_sr"

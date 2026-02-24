@@ -339,6 +339,63 @@ NEURAL_HALF_CHEETAH = {
 }
 
 # =====================================================================
+# Neural PointMaze (gymnasium-robotics — deep successor features)
+# =====================================================================
+NEURAL_POINTMAZE = {
+    # Environment — same bins as tabular for goal checking
+    "maze_id": "PointMaze_UMaze-v3",
+    "n_x_bins": 20,
+    "n_y_bins": 20,
+
+    # Neural architecture (same scale as Acrobot — 6D obs, 8 actions)
+    "sf_dim": 64,
+    "hidden_sizes": (128, 128),
+
+    # Training
+    "gamma": 0.99,
+    "lr": 3e-4,
+    "lr_w": 3e-4,
+    "batch_size": 256,
+    "buffer_size": 300_000,
+    "target_update_freq": 1000,
+    "tau": 0.005,
+    "steps_per_episode": 300,
+
+    # Two-phase training schedule
+    "train_episodes_phase1": 2000,    # Phase 1: 100% diverse (build SF map)
+    "train_episodes_phase2": 3000,    # Phase 2: 30% diverse (goal-focused)
+    "diverse_fraction_phase2": 0.3,
+    "buffer_keep_phase2": 0.3,
+    "lr_phase2_fraction": 0.5,
+
+    # Exploration — phase-aware epsilon resets
+    "epsilon_start": 1.0,
+    "epsilon_end": 0.05,
+    "epsilon_decay_steps": 150_000,
+    "epsilon_phase2_start": 0.3,
+    "epsilon_phase2_decay_steps": 100_000,
+
+    # Smooth stepping — the point mass moves slowly, so we repeat
+    # each action for multiple physics steps to cover meaningful distance.
+    # Train: 200 steps gives margin for exploration.
+    # Test: 100 steps for finer control.
+    "train_smooth_steps": 200,
+    "test_smooth_steps": 100,
+
+    # Test
+    "test_max_steps": 5000,
+    "reward": 1.0,
+    "default_cost": 0.0,
+    "terminal_bonus": 50.0,
+
+    # Eval-specific
+    "eval_n_runs": 5,
+    "eval_episodes": [500, 1000, 2000, 3000, 5000],
+    "eval_quick_episodes": [500, 1000, 2000],
+    "eval_quick_n_runs": 3,
+}
+
+# =====================================================================
 # Shared defaults (replay, Q-learning)
 # =====================================================================
 SHARED = {

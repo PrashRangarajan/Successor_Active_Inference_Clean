@@ -1,0 +1,629 @@
+"""PointMaze environment adapter for Hierarchical SR Active Inference.
+
+PointMaze is a 2D continuous-control maze navigation task from
+gymnasium-robotics. The agent controls a point mass with 2D force
+in a maze with walls and corridors.
+
+Observation (Gym): Dict with 'observation' (4D: x, y, vx, vy),
+                   'achieved_goal' (2D), 'desired_goal' (2D).
+Action (Gym):      Box(-1, 1, (2,)) -- continuous 2D force.
+
+State space:  2D position-only (x, y) discretized into bins.
+              Velocity is NOT included -- bottleneck structure is
+              purely spatial, and the SR captures temporal dynamics
+              implicitly.
+
+Actions:      8 discrete directions (4 cardinal + 4 diagonal),
+              mapped to 2D force vectors via _process_action().
+
+Neural mode:  _current_obs stores a 6D array [x, y, vx, vy, goal_x, goal_y]
+              so that ContinuousAdapter can expose rich observations to the
+              neural agent. Discretization still uses only [x, y] (first 2D).
+"""
+
+from typing import Any, List, Optional, Tuple
+
+import math
+import numpy as np
+
+from environments.binned_continuous_adapter import BinnedContinuousAdapter, clamp
+from core.state_space import BinnedContinuousStateSpace
+
+
+# 8 discrete force directions: cardinal + diagonal
+_FORCE_DIRECTIONS = np.array([
+    [ 1.0,  0.0],        # 0: East  (→)
+    [-1.0,  0.0],        # 1: West  (←)
+    [ 0.0,  1.0],        # 2: North (↑)
+    [ 0.0, -1.0],        # 3: South (↓)
+    [ 0.707,  0.707],    # 4: NE (↗)
+    [-0.707,  0.707],    # 5: NW (↖)
+    [ 0.707, -0.707],    # 6: SE (↘)
+    [-0.707, -0.707],    # 7: SW (↙)
+], dtype=np.float32)
+
+
+class PointMazeAdapter(BinnedContinuousAdapter):
+    """Adapter for gymnasium-robotics PointMaze environments.
+
+    State:   (x_bin, y_bin) -- 2D position discretized into bins.
+    Actions: 8 discrete directions (4 cardinal + 4 diagonal).
+    """
+
+    def __init__(self, env, n_x_bins: int = 20, n_y_bins: int = 20):
+        """
+        Args:
+            env: Gymnasium PointMaze environment
+                 (e.g., ``gym.make("PointMaze_UMaze-v3")``).
+            n_x_bins: Number of bins along the x axis.
+            n_y_bins: Number of bins along the y axis.
+        """
+        self._env = env
+        self.n_x_bins = n_x_bins
+        self.n_y_bins = n_y_bins
+        self._state_space = BinnedContinuousStateSpace([n_x_bins, n_y_bins])
+        self._n_actions = len(_FORCE_DIRECTIONS)  # 8
+
+        # Extract maze structure
+        self._maze = env.unwrapped.maze
+        self._maze_map = self._maze.maze_map
+
+        # Compute physical coordinate bounds from maze layout.
+        # Each cell is 1 unit; the cell (row, col) center is at
+        #   x = col - x_center,  y = y_center - row
+        # where x_center = map_width / 2, y_center = map_length / 2.
+        n_rows = self._maze.map_length
+        n_cols = self._maze.map_width
+        x_center = n_cols / 2.0
+        y_center = n_rows / 2.0
+        self._x_range = (-x_center, x_center)
+        self._y_range = (-y_center, y_center)
+        self._maze_x_center = x_center
+        self._maze_y_center = y_center
+
+        # Create discretization bins (interior edges)
+        self.x_space, self.y_space = self._create_bins()
+
+        # Precompute wall bin indices
+        self._wall_indices = self._compute_wall_indices()
+        self._wall_set = set(self._wall_indices)
+
+        # Cached desired goal from most recent reset
+        self._desired_goal = None
+
+        # State tracking — 6D continuous obs [x, y, vx, vy, goal_x, goal_y]
+        # for neural agent. Discretization uses only [x, y] (first 2D).
+        self._current_obs = None
+        self._current_state = None
+
+    @property
+    def continuous_obs_dim(self) -> int:
+        """Dimensionality of continuous observations for neural agent.
+
+        Returns 6: [x, y, vx, vy, goal_x, goal_y].
+        ContinuousAdapter checks for this property to handle Dict obs spaces.
+        """
+        return 6
+
+    # ==================== Binning ====================
+
+    def _create_bins(self) -> Tuple[np.ndarray, np.ndarray]:
+        """Create interior bin edges (n-1 edges for n bins).
+
+        Uses the CartPole/Acrobot interior-edge pattern so that
+        ``np.digitize`` naturally produces [0, n_bins-1] after clamping.
+        """
+        x_space = np.linspace(
+            self._x_range[0], self._x_range[1], self.n_x_bins + 1
+        )[1:-1]
+        y_space = np.linspace(
+            self._y_range[0], self._y_range[1], self.n_y_bins + 1
+        )[1:-1]
+        return x_space, y_space
+
+    def _compute_wall_indices(self) -> List[int]:
+        """Identify bins whose centers lie inside maze walls.
+
+        The maze_map is a grid: ``1`` = wall, ``0`` / ``'R'`` / ``'G'``
+        = open.  Each cell is 1 unit wide.
+        """
+        x_centers, y_centers = self.get_bin_centers()
+        wall_indices = []
+
+        n_rows = len(self._maze_map)
+        n_cols = len(self._maze_map[0]) if n_rows > 0 else 0
+
+        for xi in range(self.n_x_bins):
+            for yi in range(self.n_y_bins):
+                cx, cy = x_centers[xi], y_centers[yi]
+                # Map continuous (x, y) to maze cell (row, col).
+                # row = floor(y_center - y), col = floor(x + x_center)
+                col = int(math.floor(cx + self._maze_x_center))
+                row = int(math.floor(self._maze_y_center - cy))
+                col = max(0, min(col, n_cols - 1))
+                row = max(0, min(row, n_rows - 1))
+
+                if self._maze_map[row][col] == 1:
+                    idx = self._state_space.state_to_index((xi, yi))
+                    wall_indices.append(idx)
+
+        return wall_indices
+
+    # ==================== Abstract method implementations ====================
+
+    def discretize_obs(self, obs: np.ndarray) -> Tuple[int, int]:
+        """Convert (x, y) position to discrete bin indices.
+
+        Args:
+            obs: 2D ndarray ``[x, y]`` (NOT the full Gym dict).
+        """
+        x, y = float(obs[0]), float(obs[1])
+        i = clamp(np.digitize(x, self.x_space), 0, self.n_x_bins - 1)
+        j = clamp(np.digitize(y, self.y_space), 0, self.n_y_bins - 1)
+        return (i, j)
+
+    def get_goal_states(self, goal_spec: Any = None) -> List[int]:
+        """Return state indices near the goal location.
+
+        Args:
+            goal_spec: ``None`` → use ``desired_goal`` from last reset,
+                       or ``[x, y]`` position.
+
+        Returns:
+            List of bin indices within 0.5 units of the goal centre.
+        """
+        if goal_spec is None:
+            if self._desired_goal is None:
+                raise ValueError("No goal available. Call reset() first.")
+            goal_xy = self._desired_goal
+        elif isinstance(goal_spec, (list, np.ndarray)) and len(goal_spec) >= 2:
+            goal_xy = np.asarray(goal_spec[:2], dtype=np.float64)
+        else:
+            raise ValueError(f"Invalid goal spec: {goal_spec}")
+
+        goal_radius = 0.5
+        x_centers, y_centers = self.get_bin_centers()
+        goal_states = []
+
+        for xi in range(self.n_x_bins):
+            for yi in range(self.n_y_bins):
+                dist = math.sqrt(
+                    (x_centers[xi] - goal_xy[0]) ** 2
+                    + (y_centers[yi] - goal_xy[1]) ** 2
+                )
+                if dist <= goal_radius:
+                    idx = self._state_space.state_to_index((xi, yi))
+                    if idx not in self._wall_set:
+                        goal_states.append(idx)
+
+        return goal_states
+
+    def sample_random_state(self) -> np.ndarray:
+        """Reset to a random navigable position for diverse training starts.
+
+        Uses the environment's built-in reset (which randomizes the start
+        position among open cells) and optionally injects a uniform random
+        position via MuJoCo state setting.
+        """
+        obs_dict, _ = self._env.reset()
+        self._desired_goal = obs_dict['desired_goal'].copy()
+
+        # Try injecting a uniformly random navigable position
+        injected = False
+
+        for _attempt in range(50):
+            x = np.random.uniform(self._x_range[0], self._x_range[1])
+            y = np.random.uniform(self._y_range[0], self._y_range[1])
+            disc = self.discretize_obs(np.array([x, y]))
+            idx = self._state_space.state_to_index(disc)
+            if idx not in self._wall_set:
+                # Inject position via MuJoCo
+                try:
+                    point_env = self._env.unwrapped.point_env
+                    qpos = np.array([x, y])
+                    qvel = np.array([0.0, 0.0])
+                    point_env.set_state(qpos, qvel)
+                    # 6D obs: injected position, zero velocity, cached goal
+                    self._current_obs = np.concatenate([
+                        qpos, qvel, self._desired_goal
+                    ]).astype(np.float32)
+                    injected = True
+                except Exception:
+                    pass
+                break
+
+        if not injected:
+            # Fallback: use whatever position env.reset() gave us
+            self._current_obs = self._extract_continuous_obs(obs_dict)
+
+        discrete_state = self.discretize_obs(self._current_obs)
+        state_idx = self._state_space.state_to_index(discrete_state)
+        self._current_state = self._state_space.index_to_onehot(state_idx)
+        return self._current_state
+
+    # ==================== Terminal / Goal ====================
+
+    def is_terminal(self, obs: Optional[np.ndarray] = None) -> Optional[bool]:
+        """Check if the agent has reached the goal.
+
+        Uses Euclidean distance between position (obs[0:2]) and goal
+        (obs[4:6]) from the 6D continuous observation.
+
+        Args:
+            obs: 6D observation or None (uses _current_obs).
+
+        Returns:
+            True if within goal radius, False otherwise.
+        """
+        if obs is None:
+            obs = self._current_obs
+        if obs is None or self._desired_goal is None:
+            return None
+        pos = obs[:2]
+        goal = obs[4:6] if len(obs) >= 6 else self._desired_goal
+        dist = np.sqrt((pos[0] - goal[0]) ** 2 + (pos[1] - goal[1]) ** 2)
+        return bool(dist < 0.45)
+
+    # ==================== Walls ====================
+
+    def get_wall_indices(self) -> List[int]:
+        """Return precomputed list of wall bin indices."""
+        return self._wall_indices
+
+    # ==================== Step / Reset (dict obs handling) ====================
+
+    def _extract_continuous_obs(self, obs_dict: dict) -> np.ndarray:
+        """Extract 6D continuous observation from PointMaze dict.
+
+        Returns [x, y, vx, vy, goal_x, goal_y] for the neural agent.
+        Discretization uses only obs[0:2] = [x, y].
+        """
+        kinematic = obs_dict['observation'][:4]  # [x, y, vx, vy]
+        goal = obs_dict['desired_goal'][:2]      # [goal_x, goal_y]
+        return np.concatenate([kinematic, goal]).astype(np.float32)
+
+    def step(self, action: int) -> np.ndarray:
+        """Take action, handling dict observation from PointMaze."""
+        env_action = self._process_action(action)
+        obs_dict, reward, terminated, truncated, info = self._env.step(env_action)
+        self._current_obs = self._extract_continuous_obs(obs_dict)
+        discrete_state = self.discretize_obs(self._current_obs)
+        state_idx = self.state_space.state_to_index(discrete_state)
+        self._current_state = self.state_space.index_to_onehot(state_idx)
+        return self._current_state
+
+    def step_with_info(self, action: int):
+        """Take action and return (state, reward, terminated, truncated, info)."""
+        env_action = self._process_action(action)
+        obs_dict, reward, terminated, truncated, info = self._env.step(env_action)
+        self._current_obs = self._extract_continuous_obs(obs_dict)
+        discrete_state = self.discretize_obs(self._current_obs)
+        state_idx = self.state_space.state_to_index(discrete_state)
+        self._current_state = self.state_space.index_to_onehot(state_idx)
+        return self._current_state, reward, terminated, truncated, info
+
+    def _process_action(self, action: int):
+        """Convert discrete direction index to continuous 2D force array."""
+        return _FORCE_DIRECTIONS[action].copy()
+
+    def reset(self, init_state: Optional[Any] = None) -> np.ndarray:
+        """Reset environment.
+
+        Args:
+            init_state: Optional ``[x, y]`` continuous position.
+                        If None, uses Gym's randomized initialization.
+
+        Returns:
+            One-hot encoded discretized state.
+        """
+        obs_dict, _ = self._env.reset()
+
+        # Cache desired goal for get_goal_states
+        self._desired_goal = obs_dict['desired_goal'].copy()
+
+        if init_state is not None:
+            xy = np.array(init_state[:2], dtype=np.float64)
+            try:
+                point_env = self._env.unwrapped.point_env
+                point_env.set_state(xy, np.array([0.0, 0.0]))
+                # Build 6D obs: injected position, zero velocity, cached goal
+                self._current_obs = np.concatenate([
+                    xy, [0.0, 0.0], self._desired_goal
+                ]).astype(np.float32)
+            except Exception:
+                self._current_obs = self._extract_continuous_obs(obs_dict)
+        else:
+            self._current_obs = self._extract_continuous_obs(obs_dict)
+
+        discrete_state = self.discretize_obs(self._current_obs)
+        state_idx = self.state_space.state_to_index(discrete_state)
+        self._current_state = self.state_space.index_to_onehot(state_idx)
+        return self._current_state
+
+    # ==================== Clustering ====================
+
+    def get_clustering_affinity(self, M: np.ndarray,
+                                sigma: float = 0.5,
+                                blend: float = 0.15) -> np.ndarray:
+        """Build clustering affinity with light spatial smoothing.
+
+        The SR in a maze already captures wall-induced disconnections well,
+        so a lower blend weight is used compared to MountainCar. The spatial
+        kernel only helps smooth under-visited regions.
+
+        This method receives the *valid-states-only* M (walls already
+        removed by ``_learn_macro_clusters``), so only navigable bins are
+        present.
+
+        Args:
+            M: Successor matrix (N_valid x N_valid), already symmetrised.
+            sigma: Bandwidth for spatial RBF kernel.
+            blend: Maximum weight for the spatial kernel.
+
+        Returns:
+            Blended affinity matrix.
+        """
+        from scipy.spatial.distance import squareform, pdist
+
+        # Identify which valid states we have.  M is indexed from
+        # 0..N_valid-1.  We need to map back to (x, y) coordinates.
+        # The caller passes only valid (non-wall) rows/cols of M.
+        # We rebuild coordinates for each valid state in order.
+        valid_mask = self.get_valid_state_mask()
+        valid_indices = np.where(valid_mask)[0]
+        N_valid = len(valid_indices)
+
+        x_centers, y_centers = self.get_bin_centers()
+        x_range = x_centers[-1] - x_centers[0]
+        y_range = y_centers[-1] - y_centers[0]
+
+        coords = np.zeros((N_valid, 2))
+        for i, idx in enumerate(valid_indices):
+            xi, yi = self.state_space.index_to_state(idx)
+            coords[i, 0] = (x_centers[xi] - x_centers[0]) / max(x_range, 1e-8)
+            coords[i, 1] = (y_centers[yi] - y_centers[0]) / max(y_range, 1e-8)
+
+        # Spatial RBF kernel
+        D2 = squareform(pdist(coords, 'sqeuclidean'))
+        K_spatial = np.exp(-D2 / (2.0 * sigma ** 2))
+
+        # Normalize M to [0, 1]
+        M_min, M_max = M.min(), M.max()
+        if M_max > M_min:
+            M_norm = (M - M_min) / (M_max - M_min)
+        else:
+            M_norm = np.zeros_like(M)
+
+        # Adaptive blend based on row-sum confidence
+        row_sums = M.sum(axis=1)
+        rs_max = row_sums.max()
+        if rs_max > 0:
+            confidence = row_sums / rs_max
+        else:
+            confidence = np.zeros(N_valid)
+
+        conf_i = confidence[:, None]
+        conf_j = confidence[None, :]
+        pair_conf = np.minimum(conf_i, conf_j)
+
+        alpha = blend * (1.0 - pair_conf)
+
+        A = (1.0 - alpha) * M_norm + alpha * K_spatial
+        return A
+
+    # ==================== Visualization ====================
+
+    def get_state_label(self, state_index: int) -> str:
+        """Get human-readable state label."""
+        x_bin, y_bin = self.state_space.index_to_state(state_index)
+        return f"(x{x_bin},y{y_bin})"
+
+    def get_bin_centers(self) -> Tuple[np.ndarray, np.ndarray]:
+        """Get center values of x and y bins."""
+        x_edges = np.linspace(
+            self._x_range[0], self._x_range[1], self.n_x_bins + 1
+        )
+        y_edges = np.linspace(
+            self._y_range[0], self._y_range[1], self.n_y_bins + 1
+        )
+        x_centers = 0.5 * (x_edges[:-1] + x_edges[1:])
+        y_centers = 0.5 * (y_edges[:-1] + y_edges[1:])
+        return x_centers, y_centers
+
+    def get_bin_edges(self) -> Tuple[np.ndarray, np.ndarray]:
+        """Return bin edge arrays for each dimension."""
+        x_edges = np.linspace(
+            self._x_range[0], self._x_range[1], self.n_x_bins + 1
+        )
+        y_edges = np.linspace(
+            self._y_range[0], self._y_range[1], self.n_y_bins + 1
+        )
+        return x_edges, y_edges
+
+    def get_dimension_labels(self) -> Tuple[str, str]:
+        """Return axis labels for visualization."""
+        return ("X Position", "Y Position")
+
+    def obs_to_continuous(self, obs: np.ndarray) -> Tuple[float, float]:
+        """Extract (x, y) from stored observation."""
+        return float(obs[0]), float(obs[1])
+
+    def get_action_labels(self) -> List[str]:
+        """Return human-readable labels for each action."""
+        return ["→ E", "← W", "↑ N", "↓ S", "↗ NE", "↖ NW", "↘ SE", "↙ SW"]
+
+    def print_maze_layout(self):
+        """Print the maze map with wall/open indicators."""
+        print("Maze layout (1=wall, 0=open):")
+        for row in self._maze_map:
+            print("  ", row)
+
+    def print_bin_wall_map(self):
+        """Print a grid showing which bins are walls vs navigable."""
+        x_centers, y_centers = self.get_bin_centers()
+        print(f"Bin wall map ({self.n_x_bins}x{self.n_y_bins}):")
+        print(f"  ({len(self._wall_indices)} wall bins, "
+              f"{self.n_states - len(self._wall_indices)} navigable)")
+        # Print top-down: y decreasing
+        for yi in range(self.n_y_bins - 1, -1, -1):
+            row_str = ""
+            for xi in range(self.n_x_bins):
+                idx = self._state_space.state_to_index((xi, yi))
+                row_str += "█" if idx in self._wall_set else "·"
+            print(f"  y{yi:2d} {row_str}")
+
+    # ==================== Maze Visualization ====================
+
+    def draw_maze_walls(self, ax):
+        """Draw maze wall cells as filled dark rectangles on a matplotlib axis.
+
+        Draws one filled rectangle per wall cell in the maze map, using the
+        physical coordinate system. Assumes the axis already has the correct
+        x/y limits matching the maze bounds.
+
+        Args:
+            ax: matplotlib Axes object.
+        """
+        import matplotlib.patches as mpatches
+
+        n_rows = len(self._maze_map)
+        n_cols = len(self._maze_map[0]) if n_rows > 0 else 0
+
+        for row in range(n_rows):
+            for col in range(n_cols):
+                if self._maze_map[row][col] == 1:
+                    # Cell physical bounds
+                    x_lo = col - self._maze_x_center
+                    y_hi = self._maze_y_center - row
+                    rect = mpatches.Rectangle(
+                        (x_lo, y_hi - 1), 1.0, 1.0,
+                        facecolor='#2d2d2d', edgecolor='#444444',
+                        linewidth=0.5, zorder=2,
+                    )
+                    ax.add_patch(rect)
+
+    def plot_clusters_on_maze(self, agent, save_path: str,
+                              show_arrows: bool = True,
+                              show_goal: bool = True):
+        """Visualize macro-state clusters overlaid on the physical maze.
+
+        Creates a figure with:
+        - Dark rectangles for wall cells
+        - Colored tiles (one per navigable bin) showing cluster assignment
+        - Macro-action arrows between cluster centroids
+        - Goal location marker
+
+        Args:
+            agent: ``HierarchicalSRAgent`` (for cluster data).
+            save_path: Where to save the figure.
+            show_arrows: Draw macro-action arrows between clusters.
+            show_goal: Mark the goal location.
+        """
+        import os
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as mpatches
+        import matplotlib.patheffects as PathEffects
+
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+        x_edges, y_edges = self.get_bin_edges()
+        x_centers, y_centers = self.get_bin_centers()
+        dx = x_edges[1] - x_edges[0]
+        dy = y_edges[1] - y_edges[0]
+
+        # Cluster colors (tab10)
+        tab = plt.get_cmap("tab10")
+        cluster_colors = [tab(i) for i in range(agent.n_clusters)]
+
+        fig, ax = plt.subplots(figsize=(8, 8))
+
+        # Draw navigable bins colored by cluster
+        for micro_idx, macro_idx in agent.micro_to_macro.items():
+            xi, yi = self.state_space.index_to_state(micro_idx)
+            rect = mpatches.Rectangle(
+                (x_edges[xi], y_edges[yi]), dx, dy,
+                facecolor=cluster_colors[macro_idx], edgecolor='white',
+                linewidth=0.3, alpha=0.85, zorder=3,
+            )
+            ax.add_patch(rect)
+
+        # Draw walls on top
+        self.draw_maze_walls(ax)
+
+        # Macro-action arrows
+        if show_arrows and hasattr(agent, 'adj_list') and agent.adj_list:
+            centroids = {}
+            for c in range(agent.n_clusters):
+                members = agent.macro_state_list[c]
+                if not members:
+                    continue
+                coords = np.array([
+                    self.state_space.index_to_state(s) for s in members
+                ])
+                cx = np.mean(x_centers[coords[:, 0]])
+                cy = np.mean(y_centers[coords[:, 1]])
+                centroids[c] = (cx, cy)
+
+            # Goal macro states
+            goal_macros = set()
+            for gs in agent.goal_states:
+                if gs in agent.micro_to_macro:
+                    goal_macros.add(agent.micro_to_macro[gs])
+
+            V_macro = agent.M_macro @ agent.C_macro
+            for c in range(agent.n_clusters):
+                if c not in centroids or c in goal_macros:
+                    continue
+                if c not in agent.adj_list or not agent.adj_list[c]:
+                    continue
+                adj = agent.adj_list[c]
+                values = [V_macro[a] for a in adj]
+                target = adj[int(np.argmax(values))]
+                if target == c or target not in centroids:
+                    continue
+                x0, y0 = centroids[c]
+                x1, y1 = centroids[target]
+                ax.annotate(
+                    '', xy=(x1, y1), xytext=(x0, y0),
+                    arrowprops=dict(
+                        arrowstyle='->', lw=2.5, color='black',
+                        shrinkA=10, shrinkB=10,
+                    ),
+                    zorder=12,
+                )
+
+            # Cluster labels at centroids
+            for c, (cx, cy) in centroids.items():
+                label = f'{c}' + (' *' if c in goal_macros else '')
+                ax.text(
+                    cx, cy, label, fontsize=13, fontweight='bold',
+                    ha='center', va='center', color='white',
+                    path_effects=[
+                        PathEffects.withStroke(linewidth=3, foreground='black')
+                    ],
+                    zorder=13,
+                )
+
+        # Goal marker
+        if show_goal and self._desired_goal is not None:
+            ax.plot(
+                self._desired_goal[0], self._desired_goal[1],
+                marker='*', markersize=18, color='gold',
+                markeredgecolor='black', markeredgewidth=1.5, zorder=15,
+            )
+
+        ax.set_xlim(self._x_range)
+        ax.set_ylim(self._y_range)
+        ax.set_aspect('equal')
+        ax.set_xlabel("X Position", fontsize=12)
+        ax.set_ylabel("Y Position", fontsize=12)
+
+        # Legend
+        patches = [mpatches.Patch(color=cluster_colors[i], label=f'Cluster {i}')
+                   for i in range(agent.n_clusters)]
+        patches.append(mpatches.Patch(color='#2d2d2d', label='Wall'))
+        ax.legend(handles=patches, loc='upper right', fontsize=10)
+
+        fig.savefig(save_path, bbox_inches='tight', dpi=150)
+        plt.close(fig)
+        print(f"  Saved maze cluster plot to {save_path}")

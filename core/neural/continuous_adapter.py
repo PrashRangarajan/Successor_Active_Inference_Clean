@@ -30,7 +30,14 @@ class ContinuousAdapter:
 
     @property
     def obs_dim(self) -> int:
-        """Dimensionality of raw observations from the environment."""
+        """Dimensionality of raw observations from the environment.
+
+        If the base adapter defines ``continuous_obs_dim`` (e.g., for Dict
+        observation spaces like PointMaze), uses that. Otherwise falls back
+        to the standard Box observation_space shape.
+        """
+        if hasattr(self.base, 'continuous_obs_dim'):
+            return self.base.continuous_obs_dim
         return self.base.env.observation_space.shape[0]
 
     @property
