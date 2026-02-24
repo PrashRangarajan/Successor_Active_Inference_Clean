@@ -40,35 +40,58 @@ from core.neural.agent import NeuralSRAgent
 from examples.configs import NEURAL_POINTMAZE
 
 
-def maze_distance_reward(obs):
-    """Dense shaped reward based on distance to goal.
+def make_maze_distance_reward(adapter):
+    """Create a reward function using maze-aware (BFS) shortest-path distance.
 
-    Observation layout (6D): [x, y, vx, vy, goal_x, goal_y]
+    In a U-maze, Euclidean distance is deceptive — it points through walls.
+    BFS distance follows the actual corridors, giving a correct gradient
+    that guides the agent around the U to the goal.
 
-    Returns a shaped reward that guides the agent toward the goal:
-    - Base: negative distance (closer = higher reward)
-    - Proximity bonus when within 1.0 units
-    - Large bonus near goal (< 0.45 units)
+    The adapter holds the discretized bin grid and wall set, so the BFS
+    runs on the same structure and is cached for efficiency.
+
+    Args:
+        adapter: PointMazeAdapter (has maze_distance() method).
 
     Returns:
-        Scalar reward clipped to [-5, 5].
+        Reward function: obs → float.
     """
-    pos = obs[:2]
-    goal = obs[4:6]
-    dist = np.sqrt((pos[0] - goal[0]) ** 2 + (pos[1] - goal[1]) ** 2)
+    # Cache the max possible maze distance for normalization
+    _max_dist = [None]
 
-    # Base: negative distance
-    reward = -dist
+    def maze_distance_reward(obs):
+        """Dense reward based on BFS maze-path distance to goal.
 
-    # Proximity bonus
-    if dist < 1.0:
-        reward += 1.0
+        Observation layout (6D): [x, y, vx, vy, goal_x, goal_y]
+        """
+        maze_dist = adapter.maze_distance(obs)
 
-    # Near-goal bonus
-    if dist < 0.45:
-        reward += 5.0
+        # Lazy-init max distance (first call after reset)
+        if _max_dist[0] is None:
+            goal_bin = adapter.discretize_obs(obs[4:6])
+            dist_map = adapter._bfs_from_goal(goal_bin)
+            if dist_map:
+                x_bw = (adapter._x_range[1] - adapter._x_range[0]) / adapter.n_x_bins
+                y_bw = (adapter._y_range[1] - adapter._y_range[0]) / adapter.n_y_bins
+                bin_size = (x_bw + y_bw) / 2.0
+                _max_dist[0] = max(dist_map.values()) * bin_size
+            else:
+                _max_dist[0] = 5.0  # fallback
 
-    return float(np.clip(reward, -5.0, 5.0))
+        # Normalize to [-1, 0] range, then add bonuses
+        max_d = max(_max_dist[0], 0.01)
+        reward = -maze_dist / max_d  # in [-1, 0]
+
+        # Euclidean proximity bonus (fine for close range)
+        eucl_dist = np.linalg.norm(obs[:2] - obs[4:6])
+        if eucl_dist < 1.0:
+            reward += 1.0
+        if eucl_dist < 0.45:
+            reward += 5.0
+
+        return float(np.clip(reward, -5.0, 5.0))
+
+    return maze_distance_reward
 
 
 def main():
@@ -144,13 +167,17 @@ def main():
         device=device,
     )
 
+    # Build maze-aware (BFS) reward shaping — the key fix for U-maze.
+    # Euclidean distance points through walls; BFS follows corridors.
+    reward_fn = make_maze_distance_reward(base_adapter)
+
     agent.set_goal(
         goal_spec=None,
         reward=cfg["reward"],
         default_cost=cfg["default_cost"],
         use_env_reward=True,
         terminal_bonus=cfg.get("terminal_bonus", 0.0),
-        reward_shaping_fn=maze_distance_reward,
+        reward_shaping_fn=reward_fn,
     )
 
     # ==================== Two-Phase Training ====================

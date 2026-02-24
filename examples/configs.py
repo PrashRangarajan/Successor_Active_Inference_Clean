@@ -369,11 +369,14 @@ NEURAL_POINTMAZE = {
     "lr_phase2_fraction": 0.5,
 
     # Exploration — phase-aware epsilon resets
+    # Decay spans ~65% of each phase so exploration covers most of training.
+    # Phase 1: 2000 eps × 300 spe = 600K steps → decay over 390K (floor at ep 1300)
+    # Phase 2: 3000 eps × 300 spe = 900K steps → decay over 585K (floor at ep 1950)
     "epsilon_start": 1.0,
     "epsilon_end": 0.05,
-    "epsilon_decay_steps": 150_000,
+    "epsilon_decay_steps": 390_000,
     "epsilon_phase2_start": 0.3,
-    "epsilon_phase2_decay_steps": 100_000,
+    "epsilon_phase2_decay_steps": 585_000,
 
     # Smooth stepping — the point mass moves slowly, so we repeat
     # each action for multiple physics steps to cover meaningful distance.

@@ -88,6 +88,9 @@ class PointMazeAdapter(BinnedContinuousAdapter):
         self._wall_indices = self._compute_wall_indices()
         self._wall_set = set(self._wall_indices)
 
+        # BFS distance cache: goal_bin → { (xi,yi) → maze_distance }
+        self._bfs_cache: dict = {}
+
         # Cached desired goal from most recent reset
         self._desired_goal = None
 
@@ -269,6 +272,84 @@ class PointMazeAdapter(BinnedContinuousAdapter):
     def get_wall_indices(self) -> List[int]:
         """Return precomputed list of wall bin indices."""
         return self._wall_indices
+
+    # ==================== Maze-aware distance (BFS) ====================
+
+    def _bfs_from_goal(self, goal_bin: Tuple[int, int]) -> dict:
+        """Run BFS on the bin grid from a goal bin.
+
+        Returns dict mapping (xi, yi) → shortest-path distance in bin steps.
+        Navigable bins are those NOT in the wall set.  Moves are 4-connected
+        (cardinal directions) — each step = 1 bin width.
+
+        This is cached per unique goal_bin so repeated calls are O(1).
+        """
+        if goal_bin in self._bfs_cache:
+            return self._bfs_cache[goal_bin]
+
+        from collections import deque
+
+        dist_map: dict = {}
+        queue = deque()
+
+        # Check goal bin is navigable
+        goal_idx = self._state_space.state_to_index(goal_bin)
+        if goal_idx in self._wall_set:
+            # Goal inside wall — shouldn't happen, but return empty
+            self._bfs_cache[goal_bin] = dist_map
+            return dist_map
+
+        dist_map[goal_bin] = 0
+        queue.append(goal_bin)
+
+        while queue:
+            (cx, cy) = queue.popleft()
+            d = dist_map[(cx, cy)]
+            for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+                nx, ny = cx + dx, cy + dy
+                if 0 <= nx < self.n_x_bins and 0 <= ny < self.n_y_bins:
+                    if (nx, ny) not in dist_map:
+                        nidx = self._state_space.state_to_index((nx, ny))
+                        if nidx not in self._wall_set:
+                            dist_map[(nx, ny)] = d + 1
+                            queue.append((nx, ny))
+
+        self._bfs_cache[goal_bin] = dist_map
+        return dist_map
+
+    def maze_distance(self, obs: np.ndarray) -> float:
+        """Compute shortest-path maze distance from agent position to goal.
+
+        Uses BFS on the discretized bin grid, then scales to continuous
+        coordinates.  Falls back to Euclidean distance if BFS fails
+        (e.g., unreachable bin).
+
+        Args:
+            obs: 6D observation [x, y, vx, vy, goal_x, goal_y].
+
+        Returns:
+            Approximate maze-path distance in continuous coordinate units.
+        """
+        pos = obs[:2]
+        goal = obs[4:6]
+
+        # Discretize both positions
+        pos_bin = self.discretize_obs(pos)
+        goal_bin = self.discretize_obs(goal)
+
+        # Get BFS distance map from goal
+        dist_map = self._bfs_from_goal(goal_bin)
+
+        if pos_bin in dist_map:
+            # Convert bin-step distance to continuous units
+            # Each bin has width = range / n_bins
+            x_bin_width = (self._x_range[1] - self._x_range[0]) / self.n_x_bins
+            y_bin_width = (self._y_range[1] - self._y_range[0]) / self.n_y_bins
+            bin_size = (x_bin_width + y_bin_width) / 2.0  # average bin size
+            return dist_map[pos_bin] * bin_size
+        else:
+            # Fallback: Euclidean (shouldn't happen in valid maze)
+            return float(np.linalg.norm(pos - goal))
 
     # ==================== Step / Reset (dict obs handling) ====================
 
