@@ -203,6 +203,158 @@ POMDP_GRIDWORLD = {
 }
 
 # =====================================================================
+# Neural Acrobot (deep successor features)
+# =====================================================================
+NEURAL_ACROBOT = {
+    # Environment (bins only used for goal checking, not state representation)
+    "n_theta_bins": 6,
+    "n_dtheta_bins": 5,
+    "goal_velocity_filter": True,
+
+    # Neural architecture
+    "sf_dim": 64,
+    "hidden_sizes": (128, 128),
+
+    # Training — lower LR and softer target updates for stability
+    # (aligned with HalfCheetah/InvertedPendulum which converge well)
+    "gamma": 0.99,
+    "lr": 3e-4,                       # was 1e-3 — too aggressive for reach tasks
+    "lr_w": 3e-4,                     # was 1e-3
+    "batch_size": 256,                # was 128 — reduce gradient variance
+    "buffer_size": 300_000,           # was 200_000 — smooth distribution shift
+    "target_update_freq": 1000,       # was 500 — less frequent target updates
+    "tau": 0.005,                     # was 0.01 — softer Polyak averaging
+    "steps_per_episode": 500,
+
+    # Training schedule — three-phase gradual transition
+    # (avoids hard distribution shift that caused reward crash at ep 2000)
+    "train_episodes_phase1": 1500,    # Phase 1: 100% diverse (build SF representation)
+    "train_episodes_phase2": 1500,    # Phase 2: 60% diverse (gradual shift)
+    "train_episodes_phase3": 2000,    # Phase 3: 30% diverse (task-focused)
+    "diverse_fraction_phase2": 0.6,   # intermediate diversity
+    "diverse_fraction_phase3": 0.3,   # final diversity
+    "buffer_keep_phase2": 0.3,        # keep 30% of buffer at Phase 1→2
+    "buffer_keep_phase3": 0.5,        # keep 50% of buffer at Phase 2→3
+    "lr_phase2_fraction": 0.5,        # Phase 2 LR = 50% of initial
+    "lr_phase3_fraction": 0.25,       # Phase 3 LR = 25% of initial
+
+    # Exploration — phase-aware epsilon resets at distribution shifts
+    "epsilon_start": 1.0,
+    "epsilon_end": 0.05,
+    "epsilon_decay_steps": 120_000,          # Phase 1 decay
+    "epsilon_phase2_start": 0.3,             # Bump at Phase 1→2 boundary
+    "epsilon_phase2_decay_steps": 80_000,    # Decay within Phase 2
+    "epsilon_phase3_start": 0.15,            # Smaller bump at Phase 2→3
+    "epsilon_phase3_decay_steps": 50_000,    # Decay within Phase 3
+
+    # Test
+    "test_max_steps": 500,
+    "reward": 1.0,
+    "default_cost": 0.0,
+    "terminal_bonus": 100.0,  # Bonus when env terminates (goal reached)
+
+    # Eval-specific
+    "eval_n_runs": 8,
+    "eval_episodes": [500, 1000, 2000, 3000, 5000],
+    "eval_quick_episodes": [500, 1000, 2000],
+    "eval_quick_n_runs": 5,
+}
+
+# =====================================================================
+# Neural InvertedPendulum (MuJoCo — deep successor features)
+# =====================================================================
+NEURAL_INVERTED_PENDULUM = {
+    # Environment
+    "n_force_bins": 7,              # Discrete forces in [-3, 3]
+
+    # Neural architecture
+    "sf_dim": 64,
+    "hidden_sizes": (128, 128),
+
+    # Training — lower learning rates for stability on survival tasks
+    "gamma": 0.99,
+    "lr": 3e-4,
+    "lr_w": 3e-4,
+    "batch_size": 128,
+    "buffer_size": 200_000,
+    "target_update_freq": 1000,     # Less frequent target updates
+    "tau": 0.005,                   # Softer target updates
+    "steps_per_episode": 500,
+
+    # Training schedule — more episodes for this task
+    "train_episodes_diverse": 2000,   # Phase 1: build SF representation
+    "train_episodes_fixed": 3000,     # Phase 2: mixed training
+    "diverse_fraction": 0.3,
+
+    # Exploration — moderate decay; with reward shaping, early episodes
+    # are longer so steps accumulate faster than without shaping.
+    "epsilon_start": 1.0,
+    "epsilon_end": 0.05,
+    "epsilon_decay_steps": 10_000,
+
+    # Test
+    "test_max_steps": 1000,
+    "reward": 1.0,
+    "default_cost": 0.0,
+    "terminal_bonus": -5.0,          # Penalty for pole falling (termination = failure)
+
+    # Eval-specific
+    "eval_n_runs": 5,
+    "eval_episodes": [500, 1000, 2000, 3000, 5000],
+    "eval_quick_episodes": [500, 1000, 2000],
+    "eval_quick_n_runs": 2,
+}
+
+# =====================================================================
+# Neural HalfCheetah (MuJoCo — deep successor features, action-conditioned)
+# =====================================================================
+NEURAL_HALF_CHEETAH = {
+    # Environment
+    "n_bins_per_joint": 3,          # 3^6 = 729 discrete actions
+
+    # Neural architecture — action-conditioned network for large action space
+    "sf_dim": 128,
+    "hidden_sizes": (256, 256),
+    "sf_network_cls": "action_conditioned",
+
+    # Training
+    "gamma": 0.99,
+    "lr": 3e-4,
+    "lr_w": 3e-4,
+    "batch_size": 256,
+    "buffer_size": 500_000,
+    "target_update_freq": 1000,
+    "tau": 0.005,
+    "steps_per_episode": 500,
+
+    # Training schedule
+    "train_episodes_diverse": 2000,   # Phase 1: build SF representation
+    "train_episodes_fixed": 3000,     # Phase 2: mixed training
+    "diverse_fraction": 0.3,
+    "buffer_keep_phase2": 0.3,        # keep 30% of buffer at Phase 1→2
+    "lr_phase2_fraction": 0.5,        # Phase 2 LR = 50% of initial
+
+    # Exploration — phase-aware epsilon resets
+    "epsilon_start": 1.0,
+    "epsilon_end": 0.05,
+    "epsilon_decay_steps": 100_000,
+    "epsilon_phase2_start": 0.3,
+    "epsilon_phase2_decay_steps": 80_000,
+
+    # Test
+    "test_max_steps": 1000,
+    "reward": 1.0,
+    "default_cost": 0.0,
+    "terminal_bonus": 0.0,
+
+    # Eval-specific
+    "eval_n_runs": 5,
+    "eval_episodes": [500, 1000, 2000, 3000, 5000],
+    "eval_quick_episodes": [500, 1000, 2000],
+    "eval_quick_n_runs": 3,
+}
+
+# =====================================================================
 # Shared defaults (replay, Q-learning)
 # =====================================================================
 SHARED = {

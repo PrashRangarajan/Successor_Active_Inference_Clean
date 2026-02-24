@@ -19,3 +19,10 @@ __all__ = [
     'PendulumAdapter',
     'CartPoleAdapter',
 ]
+
+# MuJoCo adapters (optional — requires mujoco package)
+try:
+    from .mujoco import MuJoCoAdapter, InvertedPendulumAdapter, HalfCheetahAdapter
+    __all__ += ['MuJoCoAdapter', 'InvertedPendulumAdapter', 'HalfCheetahAdapter']
+except ImportError:
+    pass

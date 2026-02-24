@@ -1,0 +1,50 @@
+{
+  "episodes": [
+    500,
+    1000,
+    2000
+  ],
+  "n_runs": 1,
+  "n_eval": 5,
+  "config": {
+    "n_bins_per_joint": 3,
+    "sf_dim": 128,
+    "hidden_sizes": [
+      256,
+      256
+    ],
+    "sf_network_cls": "action_conditioned",
+    "gamma": 0.99,
+    "lr": 0.0003,
+    "lr_w": 0.0003,
+    "batch_size": 256,
+    "buffer_size": 500000,
+    "target_update_freq": 1000,
+    "tau": 0.005,
+    "steps_per_episode": 500,
+    "train_episodes_diverse": 2000,
+    "train_episodes_fixed": 3000,
+    "diverse_fraction": 0.3,
+    "epsilon_start": 1.0,
+    "epsilon_end": 0.05,
+    "epsilon_decay_steps": 100000,
+    "test_max_steps": 1000,
+    "reward": 1.0,
+    "default_cost": 0.0,
+    "terminal_bonus": 0.0,
+    "eval_n_runs": 3,
+    "eval_episodes": [
+      500,
+      1000,
+      2000,
+      3000,
+      5000
+    ],
+    "eval_quick_episodes": [
+      500,
+      1000,
+      2000
+    ],
+    "eval_quick_n_runs": 2
+  }
+}
