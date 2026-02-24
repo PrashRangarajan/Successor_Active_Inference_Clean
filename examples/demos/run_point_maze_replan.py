@@ -1,11 +1,13 @@
 """Continuing-goal replanning experiment for PointMaze.
 
 Demonstrates the key advantage of hierarchical SR: learn structure once,
-replan instantly.  The agent navigates to a sequence of 5 goals across
-different rooms of the U-maze.  After reaching each goal, it replans to
+replan instantly.  The agent navigates to a sequence of goals across
+different rooms of the maze.  After reaching each goal, it replans to
 the next goal by recomputing only the preference vector C (O(N)) and the
 macro preference C_macro (O(N)), while M, M_macro, clusters, adjacency
 and bottleneck states are all reused unchanged.
+
+Supports UMaze, Medium, and Large variants via config parameter.
 
 Requires: pip install gymnasium-robotics
 """
@@ -19,7 +21,7 @@ import matplotlib.pyplot as plt
 
 from core import HierarchicalSRAgent
 from environments.point_maze import PointMazeAdapter
-from examples.configs import POINTMAZE
+from examples.configs import POINTMAZE, POINTMAZE_MEDIUM, POINTMAZE_LARGE
 from core.eval_utils import AGENT_COLORS, plot_planning_cost_bars
 
 from examples.demos.run_point_maze import run_episode_with_tracking
@@ -29,59 +31,85 @@ import gymnasium_robotics
 
 gym.register_envs(gymnasium_robotics)
 
-FIGURES_DIR = "figures/pointmaze_replan"
 
+def run_replan_experiment(config=None, figures_dir=None, maze_label=None):
+    """Run the continuing-goal replanning experiment.
 
-def run_replan_experiment():
-    """Run the continuing-goal replanning experiment."""
+    Args:
+        config: Config dict (default: POINTMAZE for UMaze).
+        figures_dir: Where to save figures (default: figures/pointmaze_replan).
+        maze_label: Human-readable name for prints (default: "UMaze").
+    """
+    if config is None:
+        config = POINTMAZE
+    if figures_dir is None:
+        figures_dir = "figures/pointmaze_replan"
+    if maze_label is None:
+        maze_label = config.get("maze_id", "PointMaze_UMaze-v3")
 
     # ==================== Setup ====================
-    n_x_bins = POINTMAZE["n_x_bins"]
-    n_y_bins = POINTMAZE["n_y_bins"]
-    n_clusters = POINTMAZE["n_clusters"]
+    n_x_bins = config["n_x_bins"]
+    n_y_bins = config["n_y_bins"]
+    n_clusters = config["n_clusters"]
 
     env = gym.make(
-        POINTMAZE["maze_id"],
+        config["maze_id"],
         render_mode="rgb_array",
         max_episode_steps=500,
         continuing_task=False,
     )
     adapter = PointMazeAdapter(env, n_x_bins=n_x_bins, n_y_bins=n_y_bins)
-    print(f"State space: {adapter.n_states} total bins, "
+    print(f"\n{'#' * 70}")
+    print(f"  MAZE: {maze_label}  ({config['maze_id']})")
+    print(f"  State space: {adapter.n_states} total bins, "
           f"{adapter.n_states - len(adapter.get_wall_indices())} navigable")
+    print(f"  Bins: {n_x_bins}×{n_y_bins}, Clusters: {n_clusters}")
+    print(f"{'#' * 70}")
 
     agent = HierarchicalSRAgent(
         adapter=adapter,
         n_clusters=n_clusters,
-        gamma=POINTMAZE["gamma"],
-        learning_rate=POINTMAZE["learning_rate"],
+        gamma=config["gamma"],
+        learning_rate=config["learning_rate"],
         learn_from_experience=True,
-        train_smooth_steps=POINTMAZE["train_smooth_steps"],
-        test_smooth_steps=POINTMAZE["test_smooth_steps"],
+        train_smooth_steps=config["train_smooth_steps"],
+        test_smooth_steps=config["test_smooth_steps"],
     )
 
-    # Initial goal for learning phase (arbitrary — will be overridden)
-    goal_cell = np.array([3, 1])
+    # Initial goal for learning phase (use first replan goal)
+    replan_goals = config["replan_goals"]
+    goal_cell = np.array(replan_goals[0]["cell"])
     adapter.reset(reset_options={"goal_cell": goal_cell})
-    agent.set_goal(None, reward=POINTMAZE["reward"],
-                   default_cost=POINTMAZE["default_cost"])
+    agent.set_goal(None, reward=config["reward"],
+                   default_cost=config["default_cost"])
 
     # ==================== Learning (once!) ====================
     print("\n" + "=" * 60)
     print("LEARNING PHASE (done once — structure is reusable)")
     print("=" * 60)
-    agent.learn_environment(num_episodes=POINTMAZE["train_episodes"])
+    agent.learn_environment(num_episodes=config["train_episodes"])
     print(f"  Clusters: {n_clusters}, Adjacency: {agent.adj_list}")
     n_navigable = adapter.n_states - len(adapter.get_wall_indices())
 
-    # ==================== Goal Sequence ====================
-    replan_goals = POINTMAZE["replan_goals"]
-    start_position = [-1.375, 1.375]  # Top-left bin center
+    # ==================== Determine start position ====================
+    # Use first navigable bin center in the top-left region of the maze
+    x_centers, y_centers = adapter.get_bin_centers()
+    wall_set = set(adapter.get_wall_indices())
+    start_position = None
+    for yi in range(n_y_bins - 1, -1, -1):  # Top first (highest y)
+        for xi in range(n_x_bins):           # Left first
+            idx = adapter.state_space.state_to_index((xi, yi))
+            if idx not in wall_set:
+                start_position = [float(x_centers[xi]), float(y_centers[yi])]
+                break
+        if start_position is not None:
+            break
+    print(f"  Start position: ({start_position[0]:.3f}, {start_position[1]:.3f})")
 
+    # ==================== Goal Sequence ====================
     print("\n" + "=" * 60)
     print(f"REPLANNING EXPERIMENT — {len(replan_goals)} sequential goals")
     print("=" * 60)
-    print(f"  Start position: ({start_position[0]}, {start_position[1]})")
     for i, g in enumerate(replan_goals):
         print(f"  Goal {i + 1}: cell {g['cell']} — {g['label']}")
 
@@ -103,8 +131,8 @@ def run_replan_experiment():
         # rendered marker (PointMaze randomizes exact position per reset).
         def _reset_with_goal():
             adapter.reset(init_state=current_pos, reset_options=goal_options)
-            agent.set_goal(None, reward=POINTMAZE["reward"],
-                           default_cost=POINTMAZE["default_cost"])
+            agent.set_goal(None, reward=config["reward"],
+                           default_cost=config["default_cost"])
             agent._compute_macro_preference()
             agent.current_state = agent._get_planning_state()
 
@@ -114,7 +142,7 @@ def run_replan_experiment():
         all_goal_positions.append({"xy": goal_xy, "label": goal_info["label"]})
         print(f"  Goal position: ({goal_xy[0]:.3f}, {goal_xy[1]:.3f})")
         result_hier = agent.run_episode_hierarchical(
-            max_steps=POINTMAZE["test_max_steps"],
+            max_steps=config["test_max_steps"],
         )
         print(f"  Hierarchy: {result_hier['steps']} steps, "
               f"goal={result_hier['reached_goal']}, "
@@ -123,18 +151,15 @@ def run_replan_experiment():
         # ---- Flat episode (from same start, for comparison) ----
         _reset_with_goal()
         result_flat = agent.run_episode_flat(
-            max_steps=POINTMAZE["test_max_steps"],
+            max_steps=config["test_max_steps"],
         )
         print(f"  Flat:      {result_flat['steps']} steps, "
               f"goal={result_flat['reached_goal']}")
 
         # ---- Tracking episode (for video/trajectory) ----
-        # run_episode_with_tracking calls adapter.reset internally.
-        # Pre-sync goal, then the tracking's own reset will update
-        # _agent_goal_xy via the sync logic in adapter.reset().
         _reset_with_goal()
         frames, x_pos, y_pos, actions = run_episode_with_tracking(
-            agent, adapter, max_steps=POINTMAZE["test_max_steps"],
+            agent, adapter, max_steps=config["test_max_steps"],
             start_position=current_pos, reset_options=goal_options,
         )
         reached_tracking = agent._is_at_goal()
@@ -161,7 +186,7 @@ def run_replan_experiment():
 
     # ==================== Summary ====================
     print("\n" + "=" * 60)
-    print("SUMMARY")
+    print(f"SUMMARY — {maze_label}")
     print("=" * 60)
     print(f"{'Goal':<16} {'Hier Steps':>10} {'Hier OK':>8} {'Macro':>6} "
           f"{'Flat Steps':>10} {'Flat OK':>8}")
@@ -184,47 +209,43 @@ def run_replan_experiment():
     print("VISUALIZATIONS")
     print("=" * 60)
 
-    os.makedirs(FIGURES_DIR, exist_ok=True)
+    os.makedirs(figures_dir, exist_ok=True)
 
     # 1. Multi-goal trajectory overlay on maze
     adapter.plot_multi_goal_maze(
         agent, all_trajectories, all_goal_positions,
-        save_path=f"{FIGURES_DIR}/multi_goal_trajectory.png",
+        save_path=f"{figures_dir}/multi_goal_trajectory.png",
     )
 
     # 2. Per-goal steps comparison bar chart
     plot_replan_comparison_bars(
         results,
-        save_path=f"{FIGURES_DIR}/replan_steps_comparison.png",
+        save_path=f"{figures_dir}/replan_steps_comparison.png",
+        title=f"Replanning: Hierarchy vs Flat — {maze_label}",
     )
 
     # 3. Replanning cost comparison
     plot_planning_cost_bars(
         n_states=n_navigable,
         n_clusters=n_clusters,
-        save_path=f"{FIGURES_DIR}/replanning_cost.png",
+        save_path=f"{figures_dir}/replanning_cost.png",
     )
 
     # 4. Cluster map with all goals
-    # Reset to first goal for a clean cluster plot, then add all goals manually
     first_goal_options = {"goal_cell": np.array(replan_goals[0]["cell"])}
     adapter.reset(reset_options=first_goal_options)
-    agent.set_goal(None, reward=POINTMAZE["reward"],
-                   default_cost=POINTMAZE["default_cost"])
+    agent.set_goal(None, reward=config["reward"],
+                   default_cost=config["default_cost"])
     agent._compute_macro_preference()
-    adapter.plot_clusters_on_maze(
-        agent, save_path=f"{FIGURES_DIR}/maze_clusters_all_goals.png",
-        show_goal=False,  # We'll add all goals manually
-    )
-    # Overwrite with a version that has all goals marked
     _plot_clusters_with_all_goals(
         adapter, agent, all_goal_positions,
-        save_path=f"{FIGURES_DIR}/maze_clusters_all_goals.png",
+        save_path=f"{figures_dir}/maze_clusters_all_goals.png",
+        title=f"Macro-State Clusters — {maze_label}",
     )
 
     # 5. Combined video
     if all_frames and len(all_frames) > 10:
-        video_path = f"{FIGURES_DIR}/replan_combined.mp4"
+        video_path = f"{figures_dir}/replan_combined.mp4"
         imageio.mimsave(video_path, all_frames, fps=30, macro_block_size=1)
         print(f"  Saved combined video: {video_path} ({len(all_frames)} frames)")
 
@@ -233,8 +254,10 @@ def run_replan_experiment():
     print("DONE")
     print("=" * 60)
 
+    return results
 
-def plot_replan_comparison_bars(results, save_path: str):
+
+def plot_replan_comparison_bars(results, save_path: str, title: str = None):
     """Grouped bar chart: hierarchy vs flat steps per goal."""
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
@@ -266,7 +289,7 @@ def plot_replan_comparison_bars(results, save_path: str):
 
     ax.set_ylabel("Steps to Goal", fontsize=12)
     ax.set_xlabel("Goal", fontsize=12)
-    ax.set_title("Replanning: Hierarchy vs Flat per Goal", fontsize=14)
+    ax.set_title(title or "Replanning: Hierarchy vs Flat per Goal", fontsize=14)
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=20, ha='right', fontsize=10)
     ax.legend(fontsize=11)
@@ -278,7 +301,7 @@ def plot_replan_comparison_bars(results, save_path: str):
 
 
 def _plot_clusters_with_all_goals(adapter, agent, all_goal_positions,
-                                   save_path: str):
+                                   save_path: str, title: str = None):
     """Cluster map with ALL numbered goal stars."""
     import matplotlib.patches as mpatches
     import matplotlib.patheffects as PathEffects
@@ -293,7 +316,13 @@ def _plot_clusters_with_all_goals(adapter, agent, all_goal_positions,
     tab = plt.get_cmap("tab10")
     cluster_colors = [tab(i) for i in range(agent.n_clusters)]
 
-    fig, ax = plt.subplots(figsize=(8, 8))
+    # Scale figure to maze aspect ratio
+    x_span = adapter._x_range[1] - adapter._x_range[0]
+    y_span = adapter._y_range[1] - adapter._y_range[0]
+    aspect = x_span / max(y_span, 0.01)
+    fig_h = 8
+    fig_w = max(8, fig_h * aspect)
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
 
     for micro_idx, macro_idx in agent.micro_to_macro.items():
         xi, yi = adapter.state_space.index_to_state(micro_idx)
@@ -326,7 +355,7 @@ def _plot_clusters_with_all_goals(adapter, agent, all_goal_positions,
     ax.set_aspect('equal')
     ax.set_xlabel("X Position", fontsize=12)
     ax.set_ylabel("Y Position", fontsize=12)
-    ax.set_title("Macro-State Clusters with All Goals", fontsize=14)
+    ax.set_title(title or "Macro-State Clusters with All Goals", fontsize=14)
 
     patches = [mpatches.Patch(color=cluster_colors[i], label=f'Cluster {i}')
                for i in range(agent.n_clusters)]
@@ -338,5 +367,51 @@ def _plot_clusters_with_all_goals(adapter, agent, all_goal_positions,
     print(f"  Saved cluster+goals plot to {save_path}")
 
 
+# ==================== Convenience entry points ====================
+
+REPLAN_BASE_DIR = "figures/pointmaze_replan"
+
+
+def run_umaze():
+    """Run replanning on UMaze (small)."""
+    return run_replan_experiment(
+        config=POINTMAZE,
+        figures_dir=f"{REPLAN_BASE_DIR}/umaze",
+        maze_label="UMaze",
+    )
+
+
+def run_medium():
+    """Run replanning on Medium maze."""
+    return run_replan_experiment(
+        config=POINTMAZE_MEDIUM,
+        figures_dir=f"{REPLAN_BASE_DIR}/medium",
+        maze_label="Medium",
+    )
+
+
+def run_large():
+    """Run replanning on Large maze."""
+    return run_replan_experiment(
+        config=POINTMAZE_LARGE,
+        figures_dir=f"{REPLAN_BASE_DIR}/large",
+        maze_label="Large",
+    )
+
+
 if __name__ == '__main__':
-    run_replan_experiment()
+    import sys
+    if len(sys.argv) > 1:
+        maze_arg = sys.argv[1].lower()
+        if maze_arg == "medium":
+            run_medium()
+        elif maze_arg == "large":
+            run_large()
+        elif maze_arg == "all":
+            run_umaze()
+            run_medium()
+            run_large()
+        else:
+            run_umaze()
+    else:
+        run_umaze()

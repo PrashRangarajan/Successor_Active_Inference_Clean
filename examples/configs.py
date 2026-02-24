@@ -239,6 +239,15 @@ POINTMAZE_MEDIUM = {
     "train_episodes": 8000,     # More states to cover
     "test_max_steps": 10000,    # Longer paths
     "maze_id": "PointMaze_Medium-v3",
+
+    # Replanning: 5 goals spanning the four corners + center corridor
+    "replan_goals": [
+        {"cell": [1, 1], "label": "Top-left"},
+        {"cell": [1, 6], "label": "Top-right"},
+        {"cell": [6, 1], "label": "Bot-left"},
+        {"cell": [6, 6], "label": "Bot-right"},
+        {"cell": [3, 3], "label": "Center"},
+    ],
 }
 
 # =====================================================================
@@ -252,6 +261,16 @@ POINTMAZE_LARGE = {
     "train_episodes": 15000,    # Complex maze needs more exploration
     "test_max_steps": 20000,    # Longest paths in the maze
     "maze_id": "PointMaze_Large-v3",
+
+    # Replanning: 6 goals spanning quadrants + center + mid-corridor
+    "replan_goals": [
+        {"cell": [1, 1], "label": "Top-left"},
+        {"cell": [1, 10], "label": "Top-right"},
+        {"cell": [7, 1], "label": "Bot-left"},
+        {"cell": [7, 10], "label": "Bot-right"},
+        {"cell": [3, 5], "label": "Center"},
+        {"cell": [5, 7], "label": "Mid-right"},
+    ],
 }
 
 # =====================================================================

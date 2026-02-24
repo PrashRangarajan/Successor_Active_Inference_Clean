@@ -1,0 +1,13 @@
+{
+  "n_runs": 2,
+  "episodes": [
+    1000,
+    4000,
+    8000
+  ],
+  "maze": "umaze",
+  "maze_id": "PointMaze_UMaze-v3",
+  "n_x_bins": 20,
+  "n_y_bins": 20,
+  "n_clusters": 4
+}
