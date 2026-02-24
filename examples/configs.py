@@ -396,6 +396,56 @@ NEURAL_POINTMAZE = {
 }
 
 # =====================================================================
+# Neural AntMaze (gymnasium-robotics — deep successor features, action-conditioned)
+# =====================================================================
+NEURAL_ANTMAZE = {
+    # Environment
+    "maze_id": "AntMaze_UMaze-v5",
+    "n_bins_per_joint": 3,           # 3^8 = 6561 discrete actions
+
+    # Neural architecture — action-conditioned network for large action space
+    "sf_dim": 128,
+    "hidden_sizes": (256, 256),
+    "sf_network_cls": "action_conditioned",
+
+    # Training
+    "gamma": 0.99,
+    "lr": 3e-4,
+    "lr_w": 3e-4,
+    "batch_size": 256,
+    "buffer_size": 500_000,
+    "target_update_freq": 1000,
+    "tau": 0.005,
+    "steps_per_episode": 500,
+
+    # Training schedule — two-phase
+    "train_episodes_diverse": 2000,   # Phase 1: build SF representation
+    "train_episodes_fixed": 3000,     # Phase 2: mixed training
+    "diverse_fraction": 0.3,
+    "buffer_keep_phase2": 0.3,
+    "lr_phase2_fraction": 0.5,
+
+    # Exploration — phase-aware epsilon resets
+    "epsilon_start": 1.0,
+    "epsilon_end": 0.05,
+    "epsilon_decay_steps": 200_000,
+    "epsilon_phase2_start": 0.3,
+    "epsilon_phase2_decay_steps": 100_000,
+
+    # Test
+    "test_max_steps": 1000,
+    "reward": 1.0,
+    "default_cost": 0.0,
+    "terminal_bonus": 50.0,
+
+    # Eval-specific
+    "eval_n_runs": 5,
+    "eval_episodes": [500, 1000, 2000, 3000, 5000],
+    "eval_quick_episodes": [500, 1000, 2000],
+    "eval_quick_n_runs": 3,
+}
+
+# =====================================================================
 # Shared defaults (replay, Q-learning)
 # =====================================================================
 SHARED = {
