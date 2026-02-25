@@ -321,9 +321,9 @@ NEURAL_HALF_CHEETAH = {
     # Exploration — phase-aware epsilon resets
     "epsilon_start": 1.0,
     "epsilon_end": 0.05,
-    "epsilon_decay_steps": 100_000,
+    "epsilon_decay_steps": 650_000,           # 65% of Phase 1 (2000×500=1M steps)
     "epsilon_phase2_start": 0.3,
-    "epsilon_phase2_decay_steps": 80_000,
+    "epsilon_phase2_decay_steps": 975_000,   # 65% of Phase 2 (3000×500=1.5M steps)
 
     # Test
     "test_max_steps": 1000,
@@ -353,12 +353,12 @@ NEURAL_POINTMAZE = {
 
     # Training
     "gamma": 0.99,
-    "lr": 3e-4,
-    "lr_w": 3e-4,
+    "lr": 1e-4,             # reduced from 3e-4 — SF loss was diverging
+    "lr_w": 1e-4,           # reduced from 3e-4 — match SF LR
     "batch_size": 256,
     "buffer_size": 300_000,
     "target_update_freq": 1000,
-    "tau": 0.005,
+    "tau": 0.002,           # reduced from 0.005 — softer target updates
     "steps_per_episode": 300,
 
     # Two-phase training schedule

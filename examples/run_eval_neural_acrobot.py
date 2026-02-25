@@ -35,7 +35,10 @@ import gymnasium as gym
 import matplotlib.pyplot as plt
 import numpy as np
 
-plt.style.use("seaborn-v0_8-poster")
+try:
+    plt.style.use("seaborn-v0_8-poster")
+except OSError:
+    plt.style.use("seaborn-poster")
 
 from environments.acrobot import AcrobotAdapter
 from core.neural.continuous_adapter import ContinuousAdapter

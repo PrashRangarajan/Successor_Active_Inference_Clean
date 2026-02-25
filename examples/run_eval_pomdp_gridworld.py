@@ -35,7 +35,10 @@ from collections import OrderedDict
 import numpy as np
 import matplotlib.pyplot as plt
 
-plt.style.use("seaborn-v0_8-poster")
+try:
+    plt.style.use("seaborn-v0_8-poster")
+except OSError:
+    plt.style.use("seaborn-poster")
 
 from core import HierarchicalSRAgent
 from core.eval_utils import (

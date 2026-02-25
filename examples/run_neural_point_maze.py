@@ -24,6 +24,9 @@ import os
 import sys
 import time
 
+# Use EGL for headless MuJoCo rendering (no X11 display needed)
+os.environ.setdefault("MUJOCO_GL", "egl")
+
 # Ensure imports resolve from the project root
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 

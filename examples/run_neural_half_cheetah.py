@@ -29,12 +29,18 @@ import os
 import sys
 import time
 
+# Use EGL for headless MuJoCo rendering (no X11 display needed)
+os.environ.setdefault("MUJOCO_GL", "egl")
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import matplotlib.pyplot as plt
 import numpy as np
 
-plt.style.use("seaborn-v0_8-poster")
+try:
+    plt.style.use("seaborn-v0_8-poster")
+except OSError:
+    plt.style.use("seaborn-poster")
 
 from environments.mujoco.half_cheetah import HalfCheetahAdapter
 from core.neural.hierarchical_agent import HierarchicalNeuralSRAgent
