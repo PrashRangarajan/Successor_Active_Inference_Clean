@@ -37,13 +37,13 @@ def run_replan_experiment(config=None, figures_dir=None, maze_label=None):
 
     Args:
         config: Config dict (default: POINTMAZE for UMaze).
-        figures_dir: Where to save figures (default: figures/pointmaze_replan).
+        figures_dir: Where to save figures (default: figures/demos/pointmaze_replan).
         maze_label: Human-readable name for prints (default: "UMaze").
     """
     if config is None:
         config = POINTMAZE
     if figures_dir is None:
-        figures_dir = "figures/pointmaze_replan"
+        figures_dir = "figures/demos/pointmaze_replan"
     if maze_label is None:
         maze_label = config.get("maze_id", "PointMaze_UMaze-v3")
 
@@ -52,11 +52,18 @@ def run_replan_experiment(config=None, figures_dir=None, maze_label=None):
     n_y_bins = config["n_y_bins"]
     n_clusters = config["n_clusters"]
 
+    render_kwargs = {}
+    if "render_width" in config:
+        render_kwargs["width"] = config["render_width"]
+    if "render_height" in config:
+        render_kwargs["height"] = config["render_height"]
+
     env = gym.make(
         config["maze_id"],
         render_mode="rgb_array",
-        max_episode_steps=500,
+        max_episode_steps=config["test_max_steps"],
         continuing_task=False,
+        **render_kwargs,
     )
     adapter = PointMazeAdapter(env, n_x_bins=n_x_bins, n_y_bins=n_y_bins)
     print(f"\n{'#' * 70}")
@@ -127,18 +134,28 @@ def run_replan_experiment(config=None, figures_dir=None, maze_label=None):
               f"(cell {goal_info['cell']}) ---")
         print(f"  Start from: ({current_pos[0]:.3f}, {current_pos[1]:.3f})")
 
-        # Helper: reset + re-sync goal so _agent_goal_xy matches the
-        # rendered marker (PointMaze randomizes exact position per reset).
-        def _reset_with_goal():
+        # Reset ONCE to establish the goal position for this goal.
+        # PointMaze randomizes the exact continuous goal position within a
+        # cell on each env.reset(), so we capture it here and re-inject it
+        # on subsequent resets to guarantee hierarchy, flat, and tracking
+        # all navigate to the identical goal.
+        adapter.reset(init_state=current_pos, reset_options=goal_options)
+        goal_xy = adapter._desired_goal.copy()
+
+        def _reset_to_start():
+            """Reset agent to start position, preserving the goal from above."""
             adapter.reset(init_state=current_pos, reset_options=goal_options)
+            # Re-inject the canonical goal position so is_terminal() and
+            # get_goal_states() use the same continuous target every time.
+            adapter._desired_goal = goal_xy.copy()
+            adapter._agent_goal_xy = goal_xy.copy()
             agent.set_goal(None, reward=config["reward"],
                            default_cost=config["default_cost"])
             agent._compute_macro_preference()
             agent.current_state = agent._get_planning_state()
 
         # ---- Hierarchical episode ----
-        _reset_with_goal()
-        goal_xy = adapter._agent_goal_xy.copy()
+        _reset_to_start()
         all_goal_positions.append({"xy": goal_xy, "label": goal_info["label"]})
         print(f"  Goal position: ({goal_xy[0]:.3f}, {goal_xy[1]:.3f})")
         result_hier = agent.run_episode_hierarchical(
@@ -148,8 +165,8 @@ def run_replan_experiment(config=None, figures_dir=None, maze_label=None):
               f"goal={result_hier['reached_goal']}, "
               f"macro_decisions={result_hier['macro_decisions']}")
 
-        # ---- Flat episode (from same start, for comparison) ----
-        _reset_with_goal()
+        # ---- Flat episode (from same start, same goal) ----
+        _reset_to_start()
         result_flat = agent.run_episode_flat(
             max_steps=config["test_max_steps"],
         )
@@ -157,17 +174,26 @@ def run_replan_experiment(config=None, figures_dir=None, maze_label=None):
               f"goal={result_flat['reached_goal']}")
 
         # ---- Tracking episode (for video/trajectory) ----
-        _reset_with_goal()
+        # No need for _reset_to_start() — run_episode_with_tracking does
+        # its own reset; goal_xy pins the goal to the canonical position.
         frames, x_pos, y_pos, actions = run_episode_with_tracking(
             agent, adapter, max_steps=config["test_max_steps"],
             start_position=current_pos, reset_options=goal_options,
+            goal_xy=goal_xy,
         )
         reached_tracking = agent._is_at_goal()
         print(f"  Tracking:  {len(actions)} actions, {len(frames)} frames, "
               f"goal={reached_tracking}")
 
         all_trajectories.append({"x": x_pos, "y": y_pos})
-        all_frames.extend(frames)
+        # Cap frames per goal so a failed episode doesn't bloat the video.
+        # Successful episodes are typically short; for failures, include only
+        # the first 300 frames (10 s at 30 fps) to show where it got stuck.
+        max_frames_per_goal = 300
+        if reached_tracking or len(frames) <= max_frames_per_goal:
+            all_frames.extend(frames)
+        else:
+            all_frames.extend(frames[:max_frames_per_goal])
 
         # Update current_pos for the next goal (continuing task)
         obs = adapter.get_current_obs()
@@ -353,9 +379,9 @@ def _plot_clusters_with_all_goals(adapter, agent, all_goal_positions,
     ax.set_xlim(adapter._x_range)
     ax.set_ylim(adapter._y_range)
     ax.set_aspect('equal')
-    ax.set_xlabel("X Position", fontsize=12)
-    ax.set_ylabel("Y Position", fontsize=12)
-    ax.set_title(title or "Macro-State Clusters with All Goals", fontsize=14)
+    # ax.set_xlabel("X Position", fontsize=12)
+    # ax.set_ylabel("Y Position", fontsize=12)
+    # ax.set_title(title or "Macro-State Clusters with All Goals", fontsize=14)
 
     patches = [mpatches.Patch(color=cluster_colors[i], label=f'Cluster {i}')
                for i in range(agent.n_clusters)]
@@ -369,7 +395,7 @@ def _plot_clusters_with_all_goals(adapter, agent, all_goal_positions,
 
 # ==================== Convenience entry points ====================
 
-REPLAN_BASE_DIR = "figures/pointmaze_replan"
+REPLAN_BASE_DIR = "figures/demos/pointmaze_replan"
 
 
 def run_umaze():

@@ -57,6 +57,17 @@ class PointMazeAdapter(BinnedContinuousAdapter):
         self._env = env
         self.n_x_bins = n_x_bins
         self.n_y_bins = n_y_bins
+
+        # Set top-down camera so the full maze is visible in renders.
+        try:
+            renderer = env.unwrapped.point_env.mujoco_renderer
+            viewer = renderer._get_viewer(env.render_mode)
+            viewer.cam.elevation = -90
+            viewer.cam.azimuth = 0
+            viewer.cam.distance = 12
+            viewer.cam.lookat[:] = [0, 0, 0]
+        except Exception:
+            pass  # non-render envs or API changes
         self._state_space = BinnedContinuousStateSpace([n_x_bins, n_y_bins])
         self._n_actions = len(_FORCE_DIRECTIONS)  # 8
 
@@ -238,11 +249,11 @@ class PointMazeAdapter(BinnedContinuousAdapter):
     def is_terminal(self) -> Optional[bool]:
         """Check if the agent is within continuous distance of the goal.
 
-        Uses a threshold of 0.35 units so the ball visually overlaps the
-        rendered goal marker while still being reachable with the coarse
-        action discretization.  This is checked both in the agent's
-        ``_is_at_goal()`` method and inside ``_step_with_smooth`` to stop
-        the ball the instant it enters the goal region, preventing overshoot.
+        Uses a threshold of 0.45 units, matching PointMaze's native
+        ``compute_terminated`` success criterion.  This is checked both
+        in the agent's ``_is_at_goal()`` method and inside
+        ``_step_with_smooth`` to stop the ball the instant it enters
+        the goal region, preventing overshoot.
 
         Returns:
             True/False if a goal has been set, None otherwise.
@@ -253,7 +264,7 @@ class PointMazeAdapter(BinnedContinuousAdapter):
             (self._current_obs[0] - self._agent_goal_xy[0]) ** 2
             + (self._current_obs[1] - self._agent_goal_xy[1]) ** 2
         )
-        return dist < 0.35
+        return dist < 0.45
 
     # ==================== Walls ====================
 
@@ -439,7 +450,8 @@ class PointMazeAdapter(BinnedContinuousAdapter):
 
     def get_dimension_labels(self) -> Tuple[str, str]:
         """Return axis labels for visualization."""
-        return ("X Position", "Y Position")
+        # return ("X Position", "Y Position")
+        return ("", "")
 
     def obs_to_continuous(self, obs: np.ndarray) -> Tuple[float, float]:
         """Extract (x, y) from stored observation."""
@@ -615,8 +627,8 @@ class PointMazeAdapter(BinnedContinuousAdapter):
         ax.set_xlim(self._x_range)
         ax.set_ylim(self._y_range)
         ax.set_aspect('equal')
-        ax.set_xlabel("X Position", fontsize=12)
-        ax.set_ylabel("Y Position", fontsize=12)
+        # ax.set_xlabel("X Position", fontsize=12)
+        # ax.set_ylabel("Y Position", fontsize=12)
 
         # Legend
         patches = [mpatches.Patch(color=cluster_colors[i], label=f'Cluster {i}')
@@ -697,9 +709,9 @@ class PointMazeAdapter(BinnedContinuousAdapter):
         ax.set_xlim(self._x_range)
         ax.set_ylim(self._y_range)
         ax.set_aspect('equal')
-        ax.set_xlabel("X Position", fontsize=12)
-        ax.set_ylabel("Y Position", fontsize=12)
-        ax.set_title("Multi-Goal Replanning Trajectories", fontsize=14)
+        # ax.set_xlabel("X Position", fontsize=12)
+        # ax.set_ylabel("Y Position", fontsize=12)
+        # ax.set_title("Multi-Goal Replanning Trajectories", fontsize=14)
         ax.legend(loc='upper right', fontsize=9)
 
         fig.savefig(save_path, bbox_inches='tight', dpi=150)
