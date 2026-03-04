@@ -9,7 +9,7 @@ Hierarchical planning compensates because C_macro concentrates the sparse
 signal at the cluster level.
 
 Generates:
-  figures/pendulum_sparse/
+  figures/demos/pendulum_sparse/
     C_sparse_heatmap.png         -- sparse C as 2D heatmap
     value_comparison.png         -- V(sparse) vs V(shaped) side-by-side
     trajectory_comparison.png    -- hierarchical vs flat phase-space paths
@@ -242,7 +242,7 @@ def run_pendulum_sparse():
 
     cfg = PENDULUM_SPARSE
     init_state = [np.pi, 0.0]  # Hanging down
-    fig_dir = "figures/pendulum_sparse"
+    fig_dir = "figures/demos/pendulum_sparse"
     os.makedirs(fig_dir, exist_ok=True)
 
     # --- Environment ---

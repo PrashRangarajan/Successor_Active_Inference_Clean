@@ -101,43 +101,43 @@ def run_key_gridworld_example():
 
     # Visualize matrices (M from origin uses init_loc by default)
     origin_idx = init_loc[0] * grid_size + init_loc[1]
-    agent.view_matrices(save_dir="figures/key_gridworld/matrices", learned=True,
+    agent.view_matrices(save_dir="figures/demos/key_gridworld/matrices", learned=True,
                         origin_state=origin_idx)
-    print("  Saved matrix visualizations to figures/key_gridworld/matrices/")
+    print("  Saved matrix visualizations to figures/demos/key_gridworld/matrices/")
 
     # Visualize clusters (note: for augmented state space, this shows flattened view)
-    agent.visualize_clusters(save_dir="figures/key_gridworld/clustering")
-    print("  Saved cluster visualizations to figures/key_gridworld/clustering/")
+    agent.visualize_clusters(save_dir="figures/demos/key_gridworld/clustering")
+    print("  Saved cluster visualizations to figures/demos/key_gridworld/clustering/")
 
     # Visualize value function
-    agent.plot_value_function(save_path="figures/key_gridworld/value_function.png")
-    agent.plot_policy(save_path="figures/key_gridworld/policy.png")
-    agent.plot_value_with_policy(save_path="figures/key_gridworld/value_with_policy.png")
+    agent.plot_value_function(save_path="figures/demos/key_gridworld/value_function.png")
+    agent.plot_policy(save_path="figures/demos/key_gridworld/policy.png")
+    agent.plot_value_with_policy(save_path="figures/demos/key_gridworld/value_with_policy.png")
 
     # Run another episode and visualize trajectory
     agent.reset_episode(init_state=init_loc + (0,))
     agent.run_episode_flat(max_steps=100)
 
     # Visualize actions taken
-    agent.show_actions(save_path="figures/key_gridworld/Actions_taken.png",
+    agent.show_actions(save_path="figures/demos/key_gridworld/Actions_taken.png",
                        init_loc=init_loc, goal_loc=goal_loc)
-    print("  Saved action trajectory to figures/key_gridworld/Actions_taken.png")
+    print("  Saved action trajectory to figures/demos/key_gridworld/Actions_taken.png")
 
     # Generate video of episode trajectory (with key status + backtracking indicators)
-    agent.show_video(save_path="figures/key_gridworld/episode_video.mp4",
+    agent.show_video(save_path="figures/demos/key_gridworld/episode_video.mp4",
                      init_loc=init_loc, goal_loc=goal_loc, key_loc=key_loc)
-    print("  Saved video to figures/key_gridworld/episode_video.mp4")
+    print("  Saved video to figures/demos/key_gridworld/episode_video.mp4")
 
     # Visualize macro action policies
-    agent.visualize_policy(save_dir="figures/key_gridworld/macro_action_network")
-    print("  Saved policy visualizations to figures/key_gridworld/macro_action_network/")
+    agent.visualize_policy(save_dir="figures/demos/key_gridworld/macro_action_network")
+    print("  Saved policy visualizations to figures/demos/key_gridworld/macro_action_network/")
 
     # Composite figure (grid layout + value function + clusters + spectral embedding)
     agent.visualize_key_gridworld_composite(
-        save_path="figures/key_gridworld/key_gridworld_composite.png",
+        save_path="figures/demos/key_gridworld/key_gridworld_composite.png",
         init_loc=init_loc, goal_loc=goal_loc, key_loc=key_loc,
     )
-    print("  Saved composite figure to figures/key_gridworld/key_gridworld_composite.png")
+    print("  Saved composite figure to figures/demos/key_gridworld/key_gridworld_composite.png")
 
 if __name__ == '__main__':
     run_key_gridworld_example()

@@ -32,7 +32,7 @@ def visualize_pomdp_episode_comparison(adapter, agent, grid_size):
         agent: Agent (used for accessing goal_states)
         grid_size: Size of the grid
     """
-    os.makedirs("figures/pomdp_gridworld", exist_ok=True)
+    os.makedirs("figures/demos/pomdp_gridworld", exist_ok=True)
 
     true_states = adapter.state_history
     beliefs = adapter.belief_history
@@ -81,9 +81,9 @@ def visualize_pomdp_episode_comparison(adapter, agent, grid_size):
     ax.legend(loc='upper right', fontsize=10)
 
     plt.tight_layout()
-    plt.savefig("figures/pomdp_gridworld/episode_trajectory_comparison.png", bbox_inches='tight')
+    plt.savefig("figures/demos/pomdp_gridworld/episode_trajectory_comparison.png", bbox_inches='tight')
     plt.close()
-    print("Episode trajectory comparison saved to figures/pomdp_gridworld/episode_trajectory_comparison.png")
+    print("Episode trajectory comparison saved to figures/demos/pomdp_gridworld/episode_trajectory_comparison.png")
 
 def run_pomdp_gridworld_example(layout_name="fourrooms"):
     """Run hierarchical active inference on a POMDP gridworld."""
@@ -195,7 +195,7 @@ def run_pomdp_gridworld_example(layout_name="fourrooms"):
     print("=" * 50)
 
     # POMDP environment visualizations
-    fig_dir = "figures/pomdp_gridworld"
+    fig_dir = "figures/demos/pomdp_gridworld"
     agent.visualize_observation_entropy(save_path=f"{fig_dir}/observation_entropy.png")
     agent.visualize_observation_model(save_dir=fig_dir)
     agent.visualize_noise_zones(save_path=f"{fig_dir}/noise_zones.png",
@@ -204,18 +204,18 @@ def run_pomdp_gridworld_example(layout_name="fourrooms"):
                                            beta=beta)
 
     # Standard agent visualizations
-    agent.visualize_clusters(save_dir="figures/pomdp_gridworld/clustering")
-    agent.plot_value_function(save_path="figures/pomdp_gridworld/value_function.png")
-    agent.plot_policy(save_path="figures/pomdp_gridworld/policy.png")
-    agent.plot_value_with_policy(save_path="figures/pomdp_gridworld/value_with_policy.png")
-    agent.view_matrices(save_dir="figures/pomdp_gridworld/matrices")
+    agent.visualize_clusters(save_dir="figures/demos/pomdp_gridworld/clustering")
+    agent.plot_value_function(save_path="figures/demos/pomdp_gridworld/value_function.png")
+    agent.plot_policy(save_path="figures/demos/pomdp_gridworld/policy.png")
+    agent.plot_value_with_policy(save_path="figures/demos/pomdp_gridworld/value_with_policy.png")
+    agent.view_matrices(save_dir="figures/demos/pomdp_gridworld/matrices")
 
     # Macro action heatmap (target cluster at each state)
-    agent.plot_macro_action_heatmap(save_path="figures/pomdp_gridworld/macro_actions.png")
+    agent.plot_macro_action_heatmap(save_path="figures/demos/pomdp_gridworld/macro_actions.png")
 
     # Macro action network (per-transition micro-level policies)
-    agent.visualize_policy(save_dir="figures/pomdp_gridworld/macro_action_network")
-    print("  Saved policy visualizations to figures/pomdp_gridworld/macro_action_network/")
+    agent.visualize_policy(save_dir="figures/demos/pomdp_gridworld/macro_action_network")
+    print("  Saved policy visualizations to figures/demos/pomdp_gridworld/macro_action_network/")
 
     # ==================== Test Phase ====================
     print("\n" + "=" * 50)
@@ -239,12 +239,12 @@ def run_pomdp_gridworld_example(layout_name="fourrooms"):
     print(f"  True final state: {adapter.get_true_state()}")
 
     # Generate video of hierarchical episode trajectory
-    agent.show_video(save_path="figures/pomdp_gridworld/episode_video_hier.mp4",
+    agent.show_video(save_path="figures/demos/pomdp_gridworld/episode_video_hier.mp4",
                      init_loc=init_loc, goal_loc=goal_loc)
-    print("  Saved video to figures/pomdp_gridworld/episode_video_hier.mp4")
+    print("  Saved video to figures/demos/pomdp_gridworld/episode_video_hier.mp4")
 
     # Visualize belief trajectory for hierarchical episode
-    agent.visualize_belief_trajectory(save_dir="figures/pomdp_gridworld")
+    agent.visualize_belief_trajectory(save_dir="figures/demos/pomdp_gridworld")
 
     # Visualize episode trajectory comparison
     visualize_pomdp_episode_comparison(adapter, agent, grid_size)

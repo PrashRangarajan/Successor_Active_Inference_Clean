@@ -141,33 +141,33 @@ def run_cartpole_example():
     print("VISUALIZATION")
     print("=" * 50)
 
-    os.makedirs("figures/cartpole", exist_ok=True)
+    os.makedirs("figures/demos/cartpole", exist_ok=True)
 
     # Matrix visualizations
-    agent.view_matrices(save_dir="figures/cartpole/matrices", learned=True)
-    print("  Saved matrix visualizations to figures/cartpole/matrices/")
+    agent.view_matrices(save_dir="figures/demos/cartpole/matrices", learned=True)
+    print("  Saved matrix visualizations to figures/demos/cartpole/matrices/")
 
     # Value function, policy, and overlay plots
-    agent.plot_value_function(save_path="figures/cartpole/value_function.png")
-    agent.plot_policy(save_path="figures/cartpole/policy.png")
-    agent.plot_value_with_policy(save_path="figures/cartpole/value_with_policy.png")
+    agent.plot_value_function(save_path="figures/demos/cartpole/value_function.png")
+    agent.plot_policy(save_path="figures/demos/cartpole/policy.png")
+    agent.plot_value_with_policy(save_path="figures/demos/cartpole/value_with_policy.png")
 
     # Macro state distribution
-    plot_macro_distribution(agent, "figures/cartpole/macro_distribution.png")
+    plot_macro_distribution(agent, "figures/demos/cartpole/macro_distribution.png")
 
     # Macro action heatmap (target cluster at each state)
-    agent.plot_macro_action_heatmap(save_path="figures/cartpole/macro_actions.png")
+    agent.plot_macro_action_heatmap(save_path="figures/demos/cartpole/macro_actions.png")
 
     # Macro action network (per-transition micro-level policies)
-    agent.visualize_policy(save_dir="figures/cartpole/macro_action_network")
-    print("  Saved policy visualizations to figures/cartpole/macro_action_network/")
+    agent.visualize_policy(save_dir="figures/demos/cartpole/macro_action_network")
+    print("  Saved policy visualizations to figures/demos/cartpole/macro_action_network/")
 
     # ==================== Record Video ====================
     print("\n" + "=" * 50)
     print("RECORDING VIDEO")
     print("=" * 50)
 
-    video_path = "figures/cartpole/cartpole_episode.mp4"
+    video_path = "figures/demos/cartpole/cartpole_episode.mp4"
     frames = run_episode_with_video(agent, adapter_test, init_state, test_max_steps)
 
     if frames:

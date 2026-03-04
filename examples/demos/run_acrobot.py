@@ -124,32 +124,32 @@ def run_acrobot_example():
     print("VISUALIZATION")
     print("="*50)
 
-    os.makedirs("figures/acrobot", exist_ok=True)
+    os.makedirs("figures/demos/acrobot", exist_ok=True)
 
     # Visualize transition and successor matrices (works for all environments)
-    agent.view_matrices(save_dir="figures/acrobot/matrices", learned=True)
-    print("  Saved matrix visualizations to figures/acrobot/matrices/")
+    agent.view_matrices(save_dir="figures/demos/acrobot/matrices", learned=True)
+    print("  Saved matrix visualizations to figures/demos/acrobot/matrices/")
 
     # Also save raw matrices for custom analysis
     if agent.M is not None:
-        np.save("figures/acrobot/M_acrobot.npy", agent.M)
-        print("  Saved M matrix to figures/acrobot/M_acrobot.npy")
+        np.save("figures/demos/acrobot/M_acrobot.npy", agent.M)
+        print("  Saved M matrix to figures/demos/acrobot/M_acrobot.npy")
 
     if agent.B is not None:
-        np.save("figures/acrobot/B_acrobot.npy", agent.B)
-        print("  Saved B matrix to figures/acrobot/B_acrobot.npy")
+        np.save("figures/demos/acrobot/B_acrobot.npy", agent.B)
+        print("  Saved B matrix to figures/demos/acrobot/B_acrobot.npy")
 
     # Value function, policy, and overlay plots
-    agent.plot_value_function(save_path="figures/acrobot/value_function.png")
-    agent.plot_policy(save_path="figures/acrobot/policy.png")
-    agent.plot_value_with_policy(save_path="figures/acrobot/value_with_policy.png")
+    agent.plot_value_function(save_path="figures/demos/acrobot/value_function.png")
+    agent.plot_policy(save_path="figures/demos/acrobot/policy.png")
+    agent.plot_value_with_policy(save_path="figures/demos/acrobot/value_with_policy.png")
 
     # Plot macro state distribution
-    plot_macro_distribution(agent, "figures/acrobot/macro_distribution.png")
+    plot_macro_distribution(agent, "figures/demos/acrobot/macro_distribution.png")
 
     # Record a video of the agent
     print("\n  Recording video...")
-    video_path = "figures/acrobot/acrobot_episode.mp4"
+    video_path = "figures/demos/acrobot/acrobot_episode.mp4"
     run_video_episode(agent, adapter_test, video_path, max_steps=test_max_steps)
 
     print("\n" + "="*50)

@@ -111,13 +111,13 @@ def run_mountain_car_example():
         ("Flat", result_flat['planning_steps']),
     ])
     plot_planning_steps_bars(steps_data,
-                             save_path="figures/mountaincar/planning_steps.png")
+                             save_path="figures/demos/mountaincar/planning_steps.png")
 
     # Planning cost comparison (cached policies: N² vs k² MACs)
     plot_planning_cost_bars(
         n_states=adapter.n_states,
         n_clusters=n_clusters,
-        save_path="figures/mountaincar/planning_cost.png",
+        save_path="figures/demos/mountaincar/planning_cost.png",
     )
 
     # ==================== Visualization ====================
@@ -125,25 +125,25 @@ def run_mountain_car_example():
     print("VISUALIZATION")
     print("="*50)
 
-    os.makedirs("figures/mountaincar", exist_ok=True)
+    os.makedirs("figures/demos/mountaincar", exist_ok=True)
 
     # Matrix visualizations
-    agent.view_matrices(save_dir="figures/mountaincar/matrices", learned=True)
-    print("  Saved matrix visualizations to figures/mountaincar/matrices/")
+    agent.view_matrices(save_dir="figures/demos/mountaincar/matrices", learned=True)
+    print("  Saved matrix visualizations to figures/demos/mountaincar/matrices/")
 
     # Cluster heatmap
-    agent.visualize_clusters(save_dir="figures/mountaincar/clustering")
+    agent.visualize_clusters(save_dir="figures/demos/mountaincar/clustering")
 
     # Macro action heatmap (target cluster at each state)
-    agent.plot_macro_action_heatmap(save_path="figures/mountaincar/macro_actions.png")
+    agent.plot_macro_action_heatmap(save_path="figures/demos/mountaincar/macro_actions.png")
 
     # Per-transition micro-level policy plots (like gridworld's macro action network)
-    agent.visualize_policy(save_dir="figures/mountaincar/macro_action_network")
+    agent.visualize_policy(save_dir="figures/demos/mountaincar/macro_action_network")
 
     # Value function, policy, and overlay plots
-    agent.plot_value_function(save_path="figures/mountaincar/value_function.png")
-    agent.plot_policy(save_path="figures/mountaincar/policy.png")
-    agent.plot_value_with_policy(save_path="figures/mountaincar/value_with_policy.png")
+    agent.plot_value_function(save_path="figures/demos/mountaincar/value_function.png")
+    agent.plot_policy(save_path="figures/demos/mountaincar/policy.png")
+    agent.plot_value_with_policy(save_path="figures/demos/mountaincar/value_with_policy.png")
 
     # ==================== Record Episode + Trajectory ====================
     print("\n" + "="*50)
@@ -155,7 +155,7 @@ def run_mountain_car_example():
     )
 
     if frames:
-        video_path = "figures/mountaincar/mountain_car_episode.mp4"
+        video_path = "figures/demos/mountaincar/mountain_car_episode.mp4"
         imageio.mimsave(video_path, frames, fps=30, macro_block_size=1)
         print(f"  Video saved to: {video_path} ({len(frames)} frames)")
     else:
@@ -165,14 +165,14 @@ def run_mountain_car_example():
         # Trajectory colored by macro state
         agent.plot_trajectory_with_macro_states(
             positions, velocities,
-            save_path="figures/mountaincar/trajectory_macro_state.png",
+            save_path="figures/demos/mountaincar/trajectory_macro_state.png",
             color_by='macro_state',
         )
 
         # Trajectory colored by macro action (target cluster)
         agent.plot_trajectory_with_macro_states(
             positions, velocities,
-            save_path="figures/mountaincar/trajectory_macro_action.png",
+            save_path="figures/demos/mountaincar/trajectory_macro_action.png",
             color_by='macro_action',
             macro_action_targets=macro_targets,
         )
@@ -180,20 +180,20 @@ def run_mountain_car_example():
         # Trajectory colored by micro action taken
         agent.plot_trajectory_with_actions(
             positions, velocities, actions,
-            save_path="figures/mountaincar/trajectory_actions.png",
+            save_path="figures/demos/mountaincar/trajectory_actions.png",
         )
 
         # Stage diagram (snapshots + phase plot)
         if frames:
             agent.plot_stage_state_diagram(
                 frames, positions, velocities,
-                save_path="figures/mountaincar/mountaincar_stages.png",
+                save_path="figures/demos/mountaincar/mountaincar_stages.png",
             )
 
             # Combined vertical video (environment + animated trajectory)
             agent.generate_combined_video(
                 frames, positions, velocities,
-                save_path="figures/mountaincar/mountain_car_combined.mp4",
+                save_path="figures/demos/mountaincar/mountain_car_combined.mp4",
                 color_by='macro_action',
                 macro_action_targets=macro_targets,
             )
@@ -244,7 +244,7 @@ def run_episode_with_tracking(agent, adapter, init_state, max_steps=500):
         actions_taken.append(action)
 
         # Smooth stepping (matches run_episode_flat behaviour)
-        n_phys = agent._step_with_smooth(action, agent.test_smooth_steps)
+        n_phys, _ = agent._step_with_smooth(action, agent.test_smooth_steps)
         agent.current_state = agent._get_planning_state()
 
         steps += n_phys

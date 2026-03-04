@@ -191,7 +191,7 @@ POINTMAZE = {
     "gamma": 0.95,
     "learning_rate": 0.05,
     "learn_from_experience": True,
-    "train_episodes": 5000,
+    "train_episodes": 1500,
     "test_max_steps": 5000,
 
     # Smooth stepping: the point mass moves ~0.0024 units/physics-step.
@@ -223,8 +223,8 @@ POINTMAZE = {
 
     # Eval-specific
     "eval_n_runs": 5,
-    "eval_episodes": [500, 1000, 2000, 4000, 6000, 8000],
-    "eval_quick_episodes": [1000, 4000, 8000],
+    "eval_episodes": [25, 50, 100, 200, 300, 500, 750, 1000, 1500],
+    "eval_quick_episodes": [50, 200, 500, 1000],
     "eval_quick_n_runs": 2,
 }
 
@@ -236,18 +236,26 @@ POINTMAZE_MEDIUM = {
     "n_x_bins": 32,             # 8 cols × 4 bins/cell
     "n_y_bins": 32,             # 8 rows × 4 bins/cell
     "n_clusters": 8,            # Medium has ~6-8 natural rooms
-    "train_episodes": 8000,     # More states to cover
+    "train_episodes": 5000,     # ~416 navigable states, 5k is sufficient
     "test_max_steps": 10000,    # Longer paths
     "maze_id": "PointMaze_Medium-v3",
+    "render_width": 720,        # 8×8 → square, higher res for clarity
+    "render_height": 720,
 
     # Replanning: 5 goals spanning the four corners + center corridor
+    # Top-left is NOT first because the agent spawns in that cell;
+    # short-distance navigation on a discretized value plateau is unreliable.
     "replan_goals": [
-        {"cell": [1, 1], "label": "Top-left"},
-        {"cell": [1, 6], "label": "Top-right"},
-        {"cell": [6, 1], "label": "Bot-left"},
         {"cell": [6, 6], "label": "Bot-right"},
+        {"cell": [1, 6], "label": "Top-right"},
+        {"cell": [1, 1], "label": "Top-left"},
+        {"cell": [6, 1], "label": "Bot-left"},
         {"cell": [3, 3], "label": "Center"},
     ],
+
+    # Eval-specific (override UMaze — Medium needs more training)
+    "eval_episodes": [100, 250, 500, 750, 1000, 1500, 2000, 3000, 4000, 5000],
+    "eval_quick_episodes": [250, 1000, 3000, 5000],
 }
 
 # =====================================================================
@@ -257,10 +265,12 @@ POINTMAZE_LARGE = {
     **POINTMAZE,
     "n_x_bins": 36,             # 12 cols × 3 bins/cell
     "n_y_bins": 27,             # 9 rows × 3 bins/cell
-    "n_clusters": 10,           # Large has many rooms/corridors
-    "train_episodes": 15000,    # Complex maze needs more exploration
+    "n_clusters": 12,           # Large has many rooms/corridors; 12 keeps within-cluster paths short
+    "train_episodes": 15000,    # ~414 navigable states, complex layout needs more
     "test_max_steps": 20000,    # Longest paths in the maze
     "maze_id": "PointMaze_Large-v3",
+    "render_width": 640,        # 12:9 aspect ratio → 4:3
+    "render_height": 480,
 
     # Replanning: 6 goals spanning quadrants + center + mid-corridor
     "replan_goals": [
@@ -271,6 +281,10 @@ POINTMAZE_LARGE = {
         {"cell": [3, 5], "label": "Center"},
         {"cell": [5, 7], "label": "Mid-right"},
     ],
+
+    # Eval-specific (override UMaze — Large needs the most training)
+    "eval_episodes": [250, 500, 1000, 2000, 3000, 4000, 5000, 7000, 10000],
+    "eval_quick_episodes": [500, 2000, 5000, 10000],
 }
 
 # =====================================================================

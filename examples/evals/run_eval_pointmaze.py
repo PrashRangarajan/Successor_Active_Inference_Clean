@@ -75,7 +75,7 @@ def create_pointmaze_agent(config, num_episodes):
     env = gym.make(
         config["maze_id"],
         render_mode=None,
-        max_episode_steps=500,
+        max_episode_steps=config["test_max_steps"],
         continuing_task=False,
     )
     adapter = PointMazeAdapter(
@@ -358,14 +358,19 @@ if __name__ == "__main__":
             os.path.join(save_dir, f"pointmaze_{args_cli.maze}_steps.png"),
         )
 
-    # Reward curves
-    if os.path.exists(os.path.join(data_dir, "SR_rewards_hierarchy.npy")):
+    # Average reward curves (1 at goal, 0 otherwise)
+    steps_hier_path = os.path.join(data_dir, "SR_steps_hierarchy.npy")
+    success_hier_path = os.path.join(data_dir, "SR_success_hierarchy.npy")
+    if os.path.exists(steps_hier_path) and os.path.exists(success_hier_path):
         data = OrderedDict()
-        data["Hierarchy"] = np.load(os.path.join(data_dir, "SR_rewards_hierarchy.npy"))
-        data["Flat"] = np.load(os.path.join(data_dir, "SR_rewards_flat.npy"))
+        for label, sfx in [("Hierarchy", "hierarchy"), ("Flat", "flat")]:
+            success = np.load(os.path.join(data_dir, f"SR_success_{sfx}.npy"))
+            # reward = 1 * success + 0 * (non-goal) → just success
+            data[label] = 1.0 * success
         plot_reward_curves(
             args.episodes, data,
             os.path.join(save_dir, f"pointmaze_{args_cli.maze}_reward.png"),
+            ylabel="Average Reward",
         )
 
     # Success rate curves

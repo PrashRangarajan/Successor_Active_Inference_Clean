@@ -96,36 +96,36 @@ def run_gridworld_example(layout_name="fourrooms"):
     print("="*50)
 
     # Visualize matrices (B, M at micro and macro levels)
-    agent.view_matrices(save_dir="figures/gridworld/matrices", learned=False)
-    print("  Saved matrix visualizations to figures/gridworld/matrices/")
+    agent.view_matrices(save_dir="figures/demos/gridworld/matrices", learned=False)
+    print("  Saved matrix visualizations to figures/demos/gridworld/matrices/")
 
     # Visualize macro state clusters
-    agent.visualize_clusters(save_dir="figures/gridworld/clustering")
-    print("  Saved cluster visualizations to figures/gridworld/clustering/")
+    agent.visualize_clusters(save_dir="figures/demos/gridworld/clustering")
+    print("  Saved cluster visualizations to figures/demos/gridworld/clustering/")
 
     # Visualize value function
-    agent.plot_value_function(save_path="figures/gridworld/value_function.png")
-    agent.plot_policy(save_path="figures/gridworld/policy.png")
-    agent.plot_value_with_policy(save_path="figures/gridworld/value_with_policy.png")
-    print("  Saved value function to figures/gridworld/value_function.png")
+    agent.plot_value_function(save_path="figures/demos/gridworld/value_function.png")
+    agent.plot_policy(save_path="figures/demos/gridworld/policy.png")
+    agent.plot_value_with_policy(save_path="figures/demos/gridworld/value_with_policy.png")
+    print("  Saved value function to figures/demos/gridworld/value_function.png")
 
     # Run another episode and visualize trajectory
     agent.reset_episode(init_state=0)
     agent.run_episode_flat(max_steps=100)
 
     # Visualize actions taken
-    agent.show_actions(save_path="figures/gridworld/Actions_taken.png",
+    agent.show_actions(save_path="figures/demos/gridworld/Actions_taken.png",
                        init_loc=init_loc, goal_loc=goal_loc)
-    print("  Saved action trajectory to figures/gridworld/Actions_taken.png")
+    print("  Saved action trajectory to figures/demos/gridworld/Actions_taken.png")
 
     # Generate video of episode trajectory
-    agent.show_video(save_path="figures/gridworld/episode_video.mp4",
+    agent.show_video(save_path="figures/demos/gridworld/episode_video.mp4",
                      init_loc=init_loc, goal_loc=goal_loc)
-    print("  Saved video to figures/gridworld/episode_video.mp4")
+    print("  Saved video to figures/demos/gridworld/episode_video.mp4")
 
     # Visualize macro action policies
-    agent.visualize_policy(save_dir="figures/gridworld/macro_action_network")
-    print("  Saved policy visualizations to figures/gridworld/macro_action_network/")
+    agent.visualize_policy(save_dir="figures/demos/gridworld/macro_action_network")
+    print("  Saved policy visualizations to figures/demos/gridworld/macro_action_network/")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(

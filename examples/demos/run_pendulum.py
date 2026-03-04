@@ -225,26 +225,26 @@ def run_pendulum_example():
     print("VISUALIZATION")
     print("=" * 50)
 
-    os.makedirs("figures/pendulum", exist_ok=True)
+    os.makedirs("figures/demos/pendulum", exist_ok=True)
 
     # Value function, policy, and overlay plots
-    agent.plot_value_function(save_path="figures/pendulum/value_function.png")
-    agent.plot_policy(save_path="figures/pendulum/policy.png")
-    agent.plot_value_with_policy(save_path="figures/pendulum/value_with_policy.png")
+    agent.plot_value_function(save_path="figures/demos/pendulum/value_function.png")
+    agent.plot_policy(save_path="figures/demos/pendulum/policy.png")
+    agent.plot_value_with_policy(save_path="figures/demos/pendulum/value_with_policy.png")
 
     # Cluster heatmap
-    agent.visualize_clusters(save_dir="figures/pendulum/clustering")
+    agent.visualize_clusters(save_dir="figures/demos/pendulum/clustering")
 
     # Macro action heatmap (target cluster at each state)
-    agent.plot_macro_action_heatmap(save_path="figures/pendulum/macro_actions.png")
+    agent.plot_macro_action_heatmap(save_path="figures/demos/pendulum/macro_actions.png")
 
     # Matrix visualizations
-    agent.view_matrices(save_dir="figures/pendulum/matrices", learned=True)
-    print("  Saved matrix visualizations to figures/pendulum/matrices/")
+    agent.view_matrices(save_dir="figures/demos/pendulum/matrices", learned=True)
+    print("  Saved matrix visualizations to figures/demos/pendulum/matrices/")
 
     # Macro action network (per-transition micro-level policies)
-    agent.visualize_policy(save_dir="figures/pendulum/macro_action_network")
-    print("  Saved policy visualizations to figures/pendulum/macro_action_network/")
+    agent.visualize_policy(save_dir="figures/demos/pendulum/macro_action_network")
+    print("  Saved policy visualizations to figures/demos/pendulum/macro_action_network/")
 
     # Test hierarchical policy
     print("\n" + "=" * 50)
@@ -290,7 +290,7 @@ def run_pendulum_example():
     )
 
     if frames:
-        video_path = "figures/pendulum/pendulum_episode.mp4"
+        video_path = "figures/demos/pendulum/pendulum_episode.mp4"
         imageio.mimsave(video_path, frames, fps=30, macro_block_size=1)
         print(f"  Video saved to: {video_path} ({len(frames)} frames)")
     else:
@@ -300,34 +300,34 @@ def run_pendulum_example():
         # Trajectory colored by macro state
         agent.plot_trajectory_with_macro_states(
             thetas, omegas,
-            save_path="figures/pendulum/trajectory_macro_state.png",
+            save_path="figures/demos/pendulum/trajectory_macro_state.png",
             color_by='macro_state',
         )
 
         # Trajectory colored by macro action (target cluster)
         agent.plot_trajectory_with_macro_states(
             thetas, omegas,
-            save_path="figures/pendulum/trajectory_macro_action.png",
+            save_path="figures/demos/pendulum/trajectory_macro_action.png",
             color_by='macro_action',
         )
 
         # Trajectory colored by micro action taken
         agent.plot_trajectory_with_actions(
             thetas, omegas, actions,
-            save_path="figures/pendulum/trajectory_actions.png",
+            save_path="figures/demos/pendulum/trajectory_actions.png",
         )
 
         # Stage diagram (snapshots + phase plot)
         if frames:
             agent.plot_stage_state_diagram(
                 frames, thetas, omegas,
-                save_path="figures/pendulum/pendulum_stages.png",
+                save_path="figures/demos/pendulum/pendulum_stages.png",
             )
 
             # Combined vertical video (environment + animated trajectory)
             agent.generate_combined_video(
                 frames, thetas, omegas,
-                save_path="figures/pendulum/pendulum_combined.mp4",
+                save_path="figures/demos/pendulum/pendulum_combined.mp4",
                 color_by='macro_action',
             )
 

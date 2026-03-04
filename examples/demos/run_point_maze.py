@@ -35,11 +35,18 @@ def run_point_maze_example():
     # continuing_task=False so that Gym returns terminated=True when the
     # ball reaches the goal.  This lets _step_with_smooth stop immediately
     # rather than overshooting.
+    render_kwargs = {}
+    if "render_width" in POINTMAZE:
+        render_kwargs["width"] = POINTMAZE["render_width"]
+    if "render_height" in POINTMAZE:
+        render_kwargs["height"] = POINTMAZE["render_height"]
+
     env = gym.make(
         POINTMAZE["maze_id"],
         render_mode="rgb_array",
-        max_episode_steps=500,
+        max_episode_steps=POINTMAZE["test_max_steps"],
         continuing_task=False,
+        **render_kwargs,
     )
 
     # Wrap with adapter
@@ -108,25 +115,20 @@ def run_point_maze_example():
     print(f"Flat:          {result_flat['steps']} steps, goal: {result_flat['reached_goal']}")
 
     # Planning steps comparison
+    # Use the actual hierarchical result (which navigates via macro actions)
+    # rather than the reentrant method (which follows the flat V = M·C policy
+    # and gets stuck due to vanishing value gradients in the U-corridor).
     from collections import OrderedDict
-    adapter.reset(init_state=test_start, reset_options=goal_options)
-    agent.current_state = agent._get_planning_state()
-    result_reentrant = agent.run_episode_hierarchical_reentrant(
-        max_steps=POINTMAZE["test_max_steps"],
-    )
-    print(f"Reentrant: {result_reentrant['steps']} steps, "
-          f"macro_decisions={result_reentrant['macro_decisions']}, "
-          f"planning_steps={result_reentrant['planning_steps']}")
 
-    os.makedirs("figures/pointmaze", exist_ok=True)
+    os.makedirs("figures/demos/pointmaze", exist_ok=True)
 
     steps_data = OrderedDict([
-        ("Hierarchy", result_reentrant['planning_steps']),
+        ("Hierarchy", result['planning_steps']),
         ("Flat", result_flat['planning_steps']),
     ])
     plot_planning_steps_bars(
         steps_data,
-        save_path="figures/pointmaze/planning_steps.png",
+        save_path="figures/demos/pointmaze/planning_steps.png",
     )
 
     # Effective navigable states for cost comparison
@@ -134,7 +136,7 @@ def run_point_maze_example():
     plot_planning_cost_bars(
         n_states=n_navigable,
         n_clusters=n_clusters,
-        save_path="figures/pointmaze/planning_cost.png",
+        save_path="figures/demos/pointmaze/planning_cost.png",
     )
 
     # ==================== Visualization ====================
@@ -142,29 +144,29 @@ def run_point_maze_example():
     print("VISUALIZATION")
     print("=" * 50)
 
-    agent.view_matrices(save_dir="figures/pointmaze/matrices", learned=True)
+    agent.view_matrices(save_dir="figures/demos/pointmaze/matrices", learned=True)
     print("  Saved matrix visualizations")
 
-    agent.visualize_clusters(save_dir="figures/pointmaze/clustering")
+    agent.visualize_clusters(save_dir="figures/demos/pointmaze/clustering")
 
     # Maze-aware cluster plot (shows walls + cluster coloring)
     # Pass the original goal so the star appears at the correct location,
     # even though adapter._desired_goal may have changed during later resets.
     adapter.plot_clusters_on_maze(
-        agent, save_path="figures/pointmaze/maze_clusters.png",
+        agent, save_path="figures/demos/pointmaze/maze_clusters.png",
         goal_xy=goal,
     )
 
     agent.plot_macro_action_heatmap(
-        save_path="figures/pointmaze/macro_actions.png",
+        save_path="figures/demos/pointmaze/macro_actions.png",
     )
 
-    agent.visualize_policy(save_dir="figures/pointmaze/macro_action_network")
+    agent.visualize_policy(save_dir="figures/demos/pointmaze/macro_action_network")
 
-    agent.plot_value_function(save_path="figures/pointmaze/value_function.png")
-    agent.plot_policy(save_path="figures/pointmaze/policy.png")
+    agent.plot_value_function(save_path="figures/demos/pointmaze/value_function.png")
+    agent.plot_policy(save_path="figures/demos/pointmaze/policy.png")
     agent.plot_value_with_policy(
-        save_path="figures/pointmaze/value_with_policy.png",
+        save_path="figures/demos/pointmaze/value_with_policy.png",
     )
 
     # ==================== Record Episode + Trajectory ====================
@@ -185,36 +187,36 @@ def run_point_maze_example():
           f"reached goal: {agent._is_at_goal()}")
 
     if frames and len(frames) > 1:
-        video_path = "figures/pointmaze/pointmaze_episode.mp4"
+        video_path = "figures/demos/pointmaze/pointmaze_episode.mp4"
         imageio.mimsave(video_path, frames, fps=30, macro_block_size=1)
         print(f"  Video saved: {video_path} ({len(frames)} frames)")
 
     if len(x_positions) > 2:
         agent.plot_trajectory_with_macro_states(
             x_positions, y_positions,
-            save_path="figures/pointmaze/trajectory_macro_state.png",
+            save_path="figures/demos/pointmaze/trajectory_macro_state.png",
             color_by='macro_state',
         )
         agent.plot_trajectory_with_macro_states(
             x_positions, y_positions,
-            save_path="figures/pointmaze/trajectory_macro_action.png",
+            save_path="figures/demos/pointmaze/trajectory_macro_action.png",
             color_by='macro_action',
         )
         # plot_trajectory_with_actions uses (dim0, dim1) as axes — works for
         # (x, y) spatial trajectories, not just phase-space.
         agent.plot_trajectory_with_actions(
             x_positions, y_positions, actions,
-            save_path="figures/pointmaze/trajectory_actions.png",
+            save_path="figures/demos/pointmaze/trajectory_actions.png",
         )
 
         if frames and len(frames) > 1:
             agent.plot_stage_state_diagram(
                 frames, x_positions, y_positions,
-                save_path="figures/pointmaze/pointmaze_stages.png",
+                save_path="figures/demos/pointmaze/pointmaze_stages.png",
             )
             agent.generate_combined_video(
                 frames, x_positions, y_positions,
-                save_path="figures/pointmaze/pointmaze_combined.mp4",
+                save_path="figures/demos/pointmaze/pointmaze_combined.mp4",
                 color_by='macro_action',
             )
     else:
@@ -227,7 +229,8 @@ def run_point_maze_example():
 
 
 def run_episode_with_tracking(agent, adapter, max_steps=300,
-                               start_position=None, reset_options=None):
+                               start_position=None, reset_options=None,
+                               goal_xy=None):
     """Run an episode using the HIERARCHICAL policy while capturing frames.
 
     Mirrors agent.run_episode_hierarchical() but records (x, y) positions
@@ -239,6 +242,10 @@ def run_episode_with_tracking(agent, adapter, max_steps=300,
         max_steps: Maximum physics steps.
         start_position: Optional [x, y] start position.
         reset_options: Optional dict forwarded to env.reset() (e.g. goal_cell).
+        goal_xy: Optional [x, y] to pin the goal position after reset.
+                 PointMaze randomizes the exact continuous position within
+                 a cell on each reset; passing goal_xy overrides that so
+                 every run uses the identical goal for fair comparison.
 
     Returns:
         (frames, x_positions, y_positions, actions_taken) tuple.
@@ -249,6 +256,9 @@ def run_episode_with_tracking(agent, adapter, max_steps=300,
     actions_taken = []
 
     adapter.reset(init_state=start_position, reset_options=reset_options)
+    if goal_xy is not None:
+        adapter._desired_goal = np.array(goal_xy, dtype=np.float64)
+        adapter._agent_goal_xy = np.array(goal_xy, dtype=np.float64)
     agent.current_state = agent._get_planning_state()
     steps = 0
 
@@ -266,7 +276,7 @@ def run_episode_with_tracking(agent, adapter, max_steps=300,
         nonlocal steps
         _capture()
         actions_taken.append(action)
-        n_phys = agent._step_with_smooth(action, agent.test_smooth_steps)
+        n_phys, _ = agent._step_with_smooth(action, agent.test_smooth_steps)
         agent.current_state = agent._get_planning_state()
         steps += n_phys
 

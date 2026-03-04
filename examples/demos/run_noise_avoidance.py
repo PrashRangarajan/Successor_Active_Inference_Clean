@@ -40,7 +40,7 @@ from environments.gridworld import get_layout
 from core.hierarchical_agent import HierarchicalSRAgent
 
 
-FIG_DIR = "figures/noise_avoidance"
+FIG_DIR = "figures/demos/noise_avoidance"
 GRID_SIZE = 9
 START_LOC = (0, 0)   # left-top room
 GOAL_LOC = (6, 4)    # right-middle room
