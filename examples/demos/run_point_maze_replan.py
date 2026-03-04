@@ -376,17 +376,27 @@ def _plot_clusters_with_all_goals(adapter, agent, all_goal_positions,
             zorder=16,
         )
 
+    # Cluster centroid labels (numbered like the single-goal cluster plots)
+    x_centers, y_centers = adapter.get_bin_centers()
+    for c in range(agent.n_clusters):
+        members = agent.macro_state_list[c]
+        if not members:
+            continue
+        coords = np.array([
+            adapter.state_space.index_to_state(s) for s in members
+        ])
+        cx = np.mean(x_centers[coords[:, 0]])
+        cy = np.mean(y_centers[coords[:, 1]])
+        ax.text(
+            cx, cy, str(c), fontsize=13, fontweight='bold',
+            ha='center', va='center', color='white',
+            path_effects=[PathEffects.withStroke(linewidth=3, foreground='black')],
+            zorder=13,
+        )
+
     ax.set_xlim(adapter._x_range)
     ax.set_ylim(adapter._y_range)
     ax.set_aspect('equal')
-    # ax.set_xlabel("X Position", fontsize=12)
-    # ax.set_ylabel("Y Position", fontsize=12)
-    # ax.set_title(title or "Macro-State Clusters with All Goals", fontsize=14)
-
-    patches = [mpatches.Patch(color=cluster_colors[i], label=f'Cluster {i}')
-               for i in range(agent.n_clusters)]
-    patches.append(mpatches.Patch(color='#2d2d2d', label='Wall'))
-    ax.legend(handles=patches, loc='upper right', fontsize=10)
 
     fig.savefig(save_path, bbox_inches='tight', dpi=150)
     plt.close(fig)

@@ -630,11 +630,11 @@ class PointMazeAdapter(BinnedContinuousAdapter):
         # ax.set_xlabel("X Position", fontsize=12)
         # ax.set_ylabel("Y Position", fontsize=12)
 
-        # Legend
-        patches = [mpatches.Patch(color=cluster_colors[i], label=f'Cluster {i}')
-                   for i in range(agent.n_clusters)]
-        patches.append(mpatches.Patch(color='#2d2d2d', label='Wall'))
-        ax.legend(handles=patches, loc='upper right', fontsize=10)
+        # Legend (commented out — centroid labels on the clusters are sufficient)
+        # patches = [mpatches.Patch(color=cluster_colors[i], label=f'Cluster {i}')
+        #            for i in range(agent.n_clusters)]
+        # patches.append(mpatches.Patch(color='#2d2d2d', label='Wall'))
+        # ax.legend(handles=patches, loc='upper right', fontsize=10)
 
         fig.savefig(save_path, bbox_inches='tight', dpi=150)
         plt.close(fig)
@@ -712,7 +712,7 @@ class PointMazeAdapter(BinnedContinuousAdapter):
         # ax.set_xlabel("X Position", fontsize=12)
         # ax.set_ylabel("Y Position", fontsize=12)
         # ax.set_title("Multi-Goal Replanning Trajectories", fontsize=14)
-        ax.legend(loc='upper right', fontsize=9)
+        # ax.legend(loc='upper right', fontsize=9)
 
         fig.savefig(save_path, bbox_inches='tight', dpi=150)
         plt.close(fig)
