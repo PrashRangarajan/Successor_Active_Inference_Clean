@@ -315,7 +315,7 @@ def plot_replan_comparison_bars(results, save_path: str, title: str = None):
 
     ax.set_ylabel("Steps to Goal", fontsize=12)
     ax.set_xlabel("Goal", fontsize=12)
-    ax.set_title(title or "Replanning: Hierarchy vs Flat per Goal", fontsize=14)
+    # ax.set_title(title or "Replanning: Hierarchy vs Flat per Goal", fontsize=14)
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=20, ha='right', fontsize=10)
     ax.legend(fontsize=11)
