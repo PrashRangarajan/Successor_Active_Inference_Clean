@@ -5,6 +5,8 @@ Provides common functions used across all run_eval_*.py scripts:
 - plot_reward_curves: Plot reward vs training episodes with confidence bands
 - plot_step_curves: Plot steps vs training episodes with confidence bands
 - plot_stability_bars: Plot relative stability bar chart
+- plot_planning_steps_bars: Plot planning steps comparison bar chart
+- plot_planning_cost_bars: Plot planning cost (MACs) comparison bar chart
 - reconcile_episodes: Fix args.json / data shape mismatches
 - save_eval_data: Save experiment arrays to disk
 - load_eval_args: Load and reconcile saved args.json
@@ -140,6 +142,123 @@ def plot_stability_bars(data_dict, save_path):
     plt.ylabel("Relative Stability", fontsize=20)
     plt.tight_layout()
     plt.savefig(save_path, format="png")
+    plt.close()
+    print(f"  Saved {save_path}")
+
+
+def plot_planning_steps_bars(data_dict, save_path, ylabel="Planning Steps"):
+    """Plot a bar chart comparing planning steps across agents.
+
+    Accepts either scalar values (single run) or 1D arrays (multiple runs,
+    will show mean ± std).
+
+    Args:
+        data_dict: Dict of {label: scalar or 1D array of step counts}.
+            Common labels: "Hierarchy", "Flat", "Q-Learning".
+        save_path: Full path to save the figure.
+        ylabel: Y-axis label (default "Planning Steps").
+    """
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    labels, means, stds, bar_colors = [], [], [], []
+    for label, val in data_dict.items():
+        arr = np.atleast_1d(np.asarray(val, dtype=float))
+        if arr.size == 0:
+            continue
+        labels.append(label)
+        means.append(float(np.mean(arr)))
+        stds.append(float(np.std(arr)) if len(arr) > 1 else 0.0)
+        bar_colors.append(AGENT_COLORS.get(label, "C0"))
+
+    if not labels:
+        print("  No planning steps data — skipping")
+        return
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+    x = np.arange(len(labels))
+    has_error = any(s > 0 for s in stds)
+    bars = ax.bar(x, means, yerr=stds if has_error else None,
+                  capsize=8, color=bar_colors, edgecolor='black', linewidth=0.8)
+
+    # Add value labels on top of each bar (offset above error bar if present)
+    for i, (bar, m) in enumerate(zip(bars, means)):
+        y_pos = bar.get_height() + (stds[i] if has_error else 0)
+        ax.text(bar.get_x() + bar.get_width() / 2, y_pos,
+                f'{m:.0f}', ha='center', va='bottom', fontsize=14, fontweight='bold')
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=14)
+    ax.set_ylabel(ylabel, fontsize=14)
+    ax.tick_params(axis='y', labelsize=12)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    plt.tight_layout()
+    plt.savefig(save_path, format="png", dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"  Saved {save_path}")
+
+
+def plot_planning_cost_bars(n_states, n_clusters, save_path,
+                            ylabel="Replanning Cost (MACs)"):
+    """Plot per-decision replanning cost: Hierarchy (k²) vs Flat (N²).
+
+    When an agent must replan (e.g. goal changes, stochastic transition),
+    the cost of one planning decision is a matrix–vector product:
+
+    - **Flat**:      ``V = M @ C``            →  N² MACs
+    - **Hierarchy**: ``V = M_macro @ C_macro`` →  k² MACs
+
+    This comparison shows the *per-decision* advantage of hierarchical
+    planning — the key benefit for replanning, goal transfer, and scaling
+    to large state spaces.
+
+    Note: In a single deterministic episode the flat agent computes
+    ``M @ C`` only once, so total episode cost may actually be lower
+    for flat.  The hierarchy's advantage materialises when replanning
+    is needed (stochastic dynamics, changing goals, online adaptation).
+
+    Args:
+        n_states: Total number of micro states (N).
+        n_clusters: Number of macro states (k).
+        save_path: Full path to save the figure.
+        ylabel: Y-axis label.
+    """
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    flat_cost = n_states ** 2
+    hier_cost = n_clusters ** 2
+
+    labels = ["Hierarchy", "Flat"]
+    costs = [hier_cost, flat_cost]
+    bar_colors = [AGENT_COLORS.get(l, "C0") for l in labels]
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+    x = np.arange(len(labels))
+    bars = ax.bar(x, costs, color=bar_colors, edgecolor='black', linewidth=0.8)
+
+    # Value labels on top of each bar
+    for bar, cost in zip(bars, costs):
+        label = f'{cost:,}'
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
+                label, ha='center', va='bottom', fontsize=13, fontweight='bold')
+
+    # Reduction factor annotation
+    if hier_cost > 0:
+        ratio = flat_cost / hier_cost
+        ax.text(0.95, 0.92, f'{ratio:.0f}× reduction',
+                transform=ax.transAxes, ha='right', va='top',
+                fontsize=13, fontstyle='italic',
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='#e8e8e8',
+                          edgecolor='gray', alpha=0.9))
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=14)
+    ax.set_ylabel(ylabel, fontsize=14)
+    ax.tick_params(axis='y', labelsize=12)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    plt.tight_layout()
+    plt.savefig(save_path, format="png", dpi=150, bbox_inches='tight')
     plt.close()
     print(f"  Saved {save_path}")
 

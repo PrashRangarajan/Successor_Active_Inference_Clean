@@ -8,6 +8,7 @@ from .pomdp_gridworld import POMDPGridworldAdapter
 from .acrobot import AcrobotAdapter
 from .pendulum import PendulumAdapter
 from .cartpole import CartPoleAdapter
+from .point_maze import PointMazeAdapter
 
 __all__ = [
     'BinnedContinuousAdapter',
@@ -18,6 +19,7 @@ __all__ = [
     'AcrobotAdapter',
     'PendulumAdapter',
     'CartPoleAdapter',
+    'PointMazeAdapter',
 ]
 
 # MuJoCo adapters (optional — requires mujoco package)

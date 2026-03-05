@@ -40,9 +40,9 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "run-gridworld=examples.run_gridworld:main",
-            "run-pomdp=examples.run_pomdp_gridworld:main",
-            "run-mountain-car=examples.run_mountain_car:main",
+            "run-gridworld=examples.demos.run_gridworld:main",
+            "run-pomdp=examples.demos.run_pomdp_gridworld:main",
+            "run-mountain-car=examples.demos.run_mountain_car:main",
         ],
     },
 )

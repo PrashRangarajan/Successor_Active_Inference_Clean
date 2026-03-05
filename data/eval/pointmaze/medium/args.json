@@ -1,0 +1,20 @@
+{
+  "n_runs": 5,
+  "episodes": [
+    100,
+    250,
+    500,
+    750,
+    1000,
+    1500,
+    2000,
+    3000,
+    4000,
+    5000
+  ],
+  "maze": "medium",
+  "maze_id": "PointMaze_Medium-v3",
+  "n_x_bins": 32,
+  "n_y_bins": 32,
+  "n_clusters": 8
+}

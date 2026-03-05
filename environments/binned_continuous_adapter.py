@@ -38,6 +38,10 @@ class BinnedContinuousAdapter(BaseEnvironmentAdapter):
     # --- Properties (identical across all 4 adapters) ---
 
     @property
+    def is_continuous(self) -> bool:
+        return True
+
+    @property
     def state_space(self) -> BinnedContinuousStateSpace:
         return self._state_space
 

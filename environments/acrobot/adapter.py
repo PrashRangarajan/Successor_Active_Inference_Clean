@@ -323,3 +323,17 @@ class AcrobotAdapter(BinnedContinuousAdapter):
         dtheta1_centers = np.linspace(-4 * np.pi, 4 * np.pi, self.n_dtheta_bins)
         dtheta2_centers = np.linspace(-9 * np.pi, 9 * np.pi, self.n_dtheta_bins)
         return dtheta1_centers, dtheta2_centers
+
+    def get_bin_centers(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Get center values of all 4 state dimensions."""
+        t1, t2 = self.get_angle_bin_centers()
+        dt1, dt2 = self.get_vel_bin_centers()
+        return t1, t2, dt1, dt2
+
+    def get_dimension_labels(self) -> Tuple[str, str]:
+        """Return human-readable axis labels for the 2D projected state space."""
+        return ("θ₁", "θ₂")
+
+    def get_action_labels(self) -> List[str]:
+        """Return human-readable labels for each action index."""
+        return ["-1 Torque", "0 Torque", "+1 Torque"]

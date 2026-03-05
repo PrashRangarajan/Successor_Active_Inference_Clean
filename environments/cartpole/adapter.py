@@ -194,6 +194,56 @@ class CartPoleAdapter(BinnedContinuousAdapter):
         else:
             raise ValueError(f"Invalid goal specification for CartPole: {goal_spec}")
 
+    def create_sparse_prior(self, radius: float = 0.5,
+                            reward: float = 10.0,
+                            default_cost: float = -0.1) -> np.ndarray:
+        """Create a sparse reward vector C for all states.
+
+        Gives ``+reward`` to states within a normalised quadratic ball of
+        the balanced position and ``default_cost`` everywhere else::
+
+            C(s) = reward        if  (pos/2.4)² + (angle/0.418)² < radius²
+                   default_cost  otherwise
+
+        Position and angle are normalised by their respective physical
+        ranges so that both contribute equally to the metric.  Velocities
+        are excluded (same philosophy as Pendulum's sparse prior).
+
+        Args:
+            radius: Threshold in the normalised ``(pos/2.4, angle/0.418)``
+                metric.  A value of ~0.5 yields a moderate goal region.
+            reward: Reward value for states inside the ball.
+            default_cost: Cost for states outside the ball.
+
+        Returns:
+            C vector of shape ``(n_states,)``
+        """
+        pos_centers, vel_centers, angle_centers, ang_vel_centers = (
+            self.get_bin_centers()
+        )
+        C = np.full(self.n_states, default_cost)
+
+        pos_max = self._pos_range[1]      # 2.4
+        angle_max = self._angle_range[1]  # 0.418
+
+        n_goal = 0
+        for p in range(self.n_pos_bins):
+            for v in range(self.n_vel_bins):
+                for a in range(self.n_angle_bins):
+                    for av in range(self.n_ang_vel_bins):
+                        pos_n = pos_centers[p] / pos_max
+                        ang_n = angle_centers[a] / angle_max
+                        if pos_n ** 2 + ang_n ** 2 < radius ** 2:
+                            idx = self.state_space.state_to_index(
+                                (p, v, a, av)
+                            )
+                            C[idx] = reward
+                            n_goal += 1
+
+        print(f"Sparse prior: {n_goal}/{self.n_states} goal states "
+              f"(radius={radius}, reward={reward}, cost={default_cost})")
+        return C
+
     # ==================== Visualization ====================
 
     def get_state_label(self, state_index: int) -> str:
@@ -214,3 +264,11 @@ class CartPoleAdapter(BinnedContinuousAdapter):
         ang_vel_centers = 0.5 * (ang_vel_edges[:-1] + ang_vel_edges[1:])
 
         return pos_centers, vel_centers, angle_centers, ang_vel_centers
+
+    def get_dimension_labels(self) -> Tuple[str, str]:
+        """Return human-readable axis labels for the 2D projected state space."""
+        return ("Cart Position", "Pole Angle")
+
+    def get_action_labels(self) -> List[str]:
+        """Return human-readable labels for each action index."""
+        return ["\u2190 Push Left", "\u2192 Push Right"]

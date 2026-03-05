@@ -32,14 +32,14 @@ from core.state_space import BinnedContinuousStateSpace
 
 # 8 discrete force directions: cardinal + diagonal
 _FORCE_DIRECTIONS = np.array([
-    [ 1.0,  0.0],        # 0: East  (→)
-    [-1.0,  0.0],        # 1: West  (←)
-    [ 0.0,  1.0],        # 2: North (↑)
-    [ 0.0, -1.0],        # 3: South (↓)
-    [ 0.707,  0.707],    # 4: NE (↗)
-    [-0.707,  0.707],    # 5: NW (↖)
-    [ 0.707, -0.707],    # 6: SE (↘)
-    [-0.707, -0.707],    # 7: SW (↙)
+    [ 1.0,  0.0],        # 0: East  (->)
+    [-1.0,  0.0],        # 1: West  (<-)
+    [ 0.0,  1.0],        # 2: North (^)
+    [ 0.0, -1.0],        # 3: South (v)
+    [ 0.707,  0.707],    # 4: NE
+    [-0.707,  0.707],    # 5: NW
+    [ 0.707, -0.707],    # 6: SE
+    [-0.707, -0.707],    # 7: SW
 ], dtype=np.float32)
 
 
@@ -61,6 +61,18 @@ class PointMazeAdapter(BinnedContinuousAdapter):
         self._env = env
         self.n_x_bins = n_x_bins
         self.n_y_bins = n_y_bins
+
+        # Set top-down camera so the full maze is visible in renders.
+        try:
+            renderer = env.unwrapped.point_env.mujoco_renderer
+            viewer = renderer._get_viewer(env.render_mode)
+            viewer.cam.elevation = -90
+            viewer.cam.azimuth = 0
+            viewer.cam.distance = 12
+            viewer.cam.lookat[:] = [0, 0, 0]
+        except Exception:
+            pass  # non-render envs or API changes
+
         self._state_space = BinnedContinuousStateSpace([n_x_bins, n_y_bins])
         self._n_actions = len(_FORCE_DIRECTIONS)  # 8
 
@@ -88,13 +100,17 @@ class PointMazeAdapter(BinnedContinuousAdapter):
         self._wall_indices = self._compute_wall_indices()
         self._wall_set = set(self._wall_indices)
 
-        # BFS distance cache: goal_bin → { (xi,yi) → maze_distance }
+        # BFS distance cache: goal_bin -> { (xi,yi) -> maze_distance }
         self._bfs_cache: dict = {}
 
         # Cached desired goal from most recent reset
         self._desired_goal = None
 
-        # State tracking — 6D continuous obs [x, y, vx, vy, goal_x, goal_y]
+        # The goal XY the agent was configured with (set once by get_goal_states,
+        # stable across later resets that change _desired_goal).
+        self._agent_goal_xy = None
+
+        # State tracking -- 6D continuous obs [x, y, vx, vy, goal_x, goal_y]
         # for neural agent. Discretization uses only [x, y] (first 2D).
         self._current_obs = None
         self._current_state = None
@@ -169,7 +185,7 @@ class PointMazeAdapter(BinnedContinuousAdapter):
         """Return state indices near the goal location.
 
         Args:
-            goal_spec: ``None`` → use ``desired_goal`` from last reset,
+            goal_spec: ``None`` -> use ``desired_goal`` from last reset,
                        or ``[x, y]`` position.
 
         Returns:
@@ -183,6 +199,10 @@ class PointMazeAdapter(BinnedContinuousAdapter):
             goal_xy = np.asarray(goal_spec[:2], dtype=np.float64)
         else:
             raise ValueError(f"Invalid goal spec: {goal_spec}")
+
+        # Store the goal XY the agent will navigate toward -- used by
+        # is_terminal() for continuous distance checks.
+        self._agent_goal_xy = goal_xy.copy()
 
         goal_radius = 0.5
         x_centers, y_centers = self.get_bin_centers()
@@ -246,26 +266,22 @@ class PointMazeAdapter(BinnedContinuousAdapter):
 
     # ==================== Terminal / Goal ====================
 
-    def is_terminal(self, obs: Optional[np.ndarray] = None) -> Optional[bool]:
-        """Check if the agent has reached the goal.
+    def is_terminal(self) -> Optional[bool]:
+        """Check if the agent is within continuous distance of the goal.
 
-        Uses Euclidean distance between position (obs[0:2]) and goal
-        (obs[4:6]) from the 6D continuous observation.
-
-        Args:
-            obs: 6D observation or None (uses _current_obs).
+        Uses a threshold of 0.45 units, matching PointMaze's native
+        ``compute_terminated`` success criterion.
 
         Returns:
-            True if within goal radius, False otherwise.
+            True/False if a goal has been set, None otherwise.
         """
-        if obs is None:
-            obs = self._current_obs
-        if obs is None or self._desired_goal is None:
+        if self._agent_goal_xy is None:
             return None
-        pos = obs[:2]
-        goal = obs[4:6] if len(obs) >= 6 else self._desired_goal
-        dist = np.sqrt((pos[0] - goal[0]) ** 2 + (pos[1] - goal[1]) ** 2)
-        return bool(dist < 0.45)
+        dist = math.sqrt(
+            (self._current_obs[0] - self._agent_goal_xy[0]) ** 2
+            + (self._current_obs[1] - self._agent_goal_xy[1]) ** 2
+        )
+        return dist < 0.45
 
     # ==================== Walls ====================
 
@@ -278,9 +294,9 @@ class PointMazeAdapter(BinnedContinuousAdapter):
     def _bfs_from_goal(self, goal_bin: Tuple[int, int]) -> dict:
         """Run BFS on the bin grid from a goal bin.
 
-        Returns dict mapping (xi, yi) → shortest-path distance in bin steps.
+        Returns dict mapping (xi, yi) -> shortest-path distance in bin steps.
         Navigable bins are those NOT in the wall set.  Moves are 4-connected
-        (cardinal directions) — each step = 1 bin width.
+        (cardinal directions) -- each step = 1 bin width.
 
         This is cached per unique goal_bin so repeated calls are O(1).
         """
@@ -295,7 +311,7 @@ class PointMazeAdapter(BinnedContinuousAdapter):
         # Check goal bin is navigable
         goal_idx = self._state_space.state_to_index(goal_bin)
         if goal_idx in self._wall_set:
-            # Goal inside wall — shouldn't happen, but return empty
+            # Goal inside wall -- shouldn't happen, but return empty
             self._bfs_cache[goal_bin] = dist_map
             return dist_map
 
@@ -387,20 +403,21 @@ class PointMazeAdapter(BinnedContinuousAdapter):
         """Convert discrete direction index to continuous 2D force array."""
         return _FORCE_DIRECTIONS[action].copy()
 
-    def reset(self, init_state: Optional[Any] = None) -> np.ndarray:
+    def reset(self, init_state: Optional[Any] = None,
+              reset_options: Optional[dict] = None) -> np.ndarray:
         """Reset environment.
 
         Args:
             init_state: Optional ``[x, y]`` continuous position.
                         If None, uses Gym's randomized initialization.
+            reset_options: Optional dict forwarded to ``env.reset(options=...)``.
+                          E.g. ``{'goal_cell': np.array([3, 1])}`` to force
+                          the goal to a specific maze cell.
 
         Returns:
             One-hot encoded discretized state.
         """
-        obs_dict, _ = self._env.reset()
-
-        # Cache desired goal for get_goal_states
-        self._desired_goal = obs_dict['desired_goal'].copy()
+        obs_dict, _ = self._env.reset(options=reset_options)
 
         if init_state is not None:
             xy = np.array(init_state[:2], dtype=np.float64)
@@ -409,12 +426,26 @@ class PointMazeAdapter(BinnedContinuousAdapter):
                 point_env.set_state(xy, np.array([0.0, 0.0]))
                 # Build 6D obs: injected position, zero velocity, cached goal
                 self._current_obs = np.concatenate([
-                    xy, [0.0, 0.0], self._desired_goal
+                    xy, [0.0, 0.0], obs_dict['desired_goal'][:2]
                 ]).astype(np.float32)
             except Exception:
                 self._current_obs = self._extract_continuous_obs(obs_dict)
         else:
             self._current_obs = self._extract_continuous_obs(obs_dict)
+
+        # Cache desired goal for get_goal_states
+        self._desired_goal = obs_dict['desired_goal'].copy()
+
+        # Keep the continuous goal target (_agent_goal_xy) in sync with
+        # the rendered goal marker.  PointMaze randomizes the exact
+        # continuous position within a cell on each reset, so a stale
+        # _agent_goal_xy would make is_terminal() check distance to a
+        # slightly different point than what's rendered.
+        # Only sync when reset_options is explicitly provided (i.e. the
+        # caller is setting a specific goal cell for testing), NOT during
+        # learning where sample_random_state calls env.reset randomly.
+        if self._agent_goal_xy is not None and reset_options is not None:
+            self._agent_goal_xy = self._desired_goal.copy()
 
         discrete_state = self.discretize_obs(self._current_obs)
         state_idx = self.state_space.state_to_index(discrete_state)
@@ -523,7 +554,7 @@ class PointMazeAdapter(BinnedContinuousAdapter):
 
     def get_dimension_labels(self) -> Tuple[str, str]:
         """Return axis labels for visualization."""
-        return ("X Position", "Y Position")
+        return ("", "")
 
     def obs_to_continuous(self, obs: np.ndarray) -> Tuple[float, float]:
         """Extract (x, y) from stored observation."""
@@ -531,7 +562,7 @@ class PointMazeAdapter(BinnedContinuousAdapter):
 
     def get_action_labels(self) -> List[str]:
         """Return human-readable labels for each action."""
-        return ["→ E", "← W", "↑ N", "↓ S", "↗ NE", "↖ NW", "↘ SE", "↙ SW"]
+        return ["-> E", "<- W", "^ N", "v S", "NE", "NW", "SE", "SW"]
 
     def print_maze_layout(self):
         """Print the maze map with wall/open indicators."""
@@ -550,7 +581,7 @@ class PointMazeAdapter(BinnedContinuousAdapter):
             row_str = ""
             for xi in range(self.n_x_bins):
                 idx = self._state_space.state_to_index((xi, yi))
-                row_str += "█" if idx in self._wall_set else "·"
+                row_str += "#" if idx in self._wall_set else "."
             print(f"  y{yi:2d} {row_str}")
 
     # ==================== Maze Visualization ====================
@@ -585,7 +616,8 @@ class PointMazeAdapter(BinnedContinuousAdapter):
 
     def plot_clusters_on_maze(self, agent, save_path: str,
                               show_arrows: bool = True,
-                              show_goal: bool = True):
+                              show_goal: bool = True,
+                              goal_xy=None):
         """Visualize macro-state clusters overlaid on the physical maze.
 
         Creates a figure with:
@@ -599,6 +631,7 @@ class PointMazeAdapter(BinnedContinuousAdapter):
             save_path: Where to save the figure.
             show_arrows: Draw macro-action arrows between clusters.
             show_goal: Mark the goal location.
+            goal_xy: Explicit goal [x, y] to show. Falls back to _desired_goal.
         """
         import os
         import matplotlib.pyplot as plt
@@ -685,10 +718,12 @@ class PointMazeAdapter(BinnedContinuousAdapter):
                     zorder=13,
                 )
 
-        # Goal marker
-        if show_goal and self._desired_goal is not None:
+        # Goal marker -- use explicit goal_xy if provided, else fall back to
+        # adapter's cached desired_goal (which may have changed on later resets).
+        _goal = goal_xy if goal_xy is not None else self._desired_goal
+        if show_goal and _goal is not None:
             ax.plot(
-                self._desired_goal[0], self._desired_goal[1],
+                _goal[0], _goal[1],
                 marker='*', markersize=18, color='gold',
                 markeredgecolor='black', markeredgewidth=1.5, zorder=15,
             )
@@ -696,15 +731,81 @@ class PointMazeAdapter(BinnedContinuousAdapter):
         ax.set_xlim(self._x_range)
         ax.set_ylim(self._y_range)
         ax.set_aspect('equal')
-        ax.set_xlabel("X Position", fontsize=12)
-        ax.set_ylabel("Y Position", fontsize=12)
-
-        # Legend
-        patches = [mpatches.Patch(color=cluster_colors[i], label=f'Cluster {i}')
-                   for i in range(agent.n_clusters)]
-        patches.append(mpatches.Patch(color='#2d2d2d', label='Wall'))
-        ax.legend(handles=patches, loc='upper right', fontsize=10)
 
         fig.savefig(save_path, bbox_inches='tight', dpi=150)
         plt.close(fig)
         print(f"  Saved maze cluster plot to {save_path}")
+
+    def plot_multi_goal_maze(self, agent, trajectories, goals, save_path: str):
+        """Overlay multiple goal-reaching trajectories on the maze cluster map.
+
+        Args:
+            agent: Trained ``HierarchicalSRAgent``.
+            trajectories: List of dicts, each with ``'x'`` and ``'y'`` lists.
+            goals: List of dicts, each with ``'xy'`` (physical [x, y]) and
+                   ``'label'`` (short name like "Bottom-left").
+            save_path: Output path for the figure.
+        """
+        import os
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as mpatches
+        import matplotlib.patheffects as PathEffects
+
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+        x_edges, y_edges = self.get_bin_edges()
+        x_centers, y_centers = self.get_bin_centers()
+        dx = x_edges[1] - x_edges[0]
+        dy = y_edges[1] - y_edges[0]
+
+        tab = plt.get_cmap("tab10")
+        cluster_colors = [tab(i) for i in range(agent.n_clusters)]
+
+        fig, ax = plt.subplots(figsize=(9, 9))
+
+        # Navigable bins coloured by cluster (faded for backdrop)
+        for micro_idx, macro_idx in agent.micro_to_macro.items():
+            xi, yi = self.state_space.index_to_state(micro_idx)
+            rect = mpatches.Rectangle(
+                (x_edges[xi], y_edges[yi]), dx, dy,
+                facecolor=cluster_colors[macro_idx], edgecolor='white',
+                linewidth=0.3, alpha=0.35, zorder=3,
+            )
+            ax.add_patch(rect)
+
+        self.draw_maze_walls(ax)
+
+        # Trajectory colours -- distinct from cluster colours
+        traj_cmap = plt.get_cmap("Set1")
+        n_goals = len(goals)
+
+        for gi, (traj, goal_info) in enumerate(zip(trajectories, goals)):
+            color = traj_cmap(gi / max(n_goals - 1, 1))
+            xs, ys = traj['x'], traj['y']
+            if len(xs) < 2:
+                continue
+            ax.plot(xs, ys, '-', color=color, linewidth=2.0, alpha=0.85,
+                    zorder=6, label=f"Goal {gi + 1}: {goal_info['label']}")
+            # Start marker for first trajectory only
+            if gi == 0:
+                ax.plot(xs[0], ys[0], 'o', color='white', markersize=10,
+                        markeredgecolor='black', markeredgewidth=2, zorder=8)
+
+            # Goal star with number
+            gx, gy = goal_info['xy']
+            ax.plot(gx, gy, marker='*', markersize=20, color=color,
+                    markeredgecolor='black', markeredgewidth=1.2, zorder=10)
+            ax.text(
+                gx + 0.12, gy + 0.12, str(gi + 1),
+                fontsize=11, fontweight='bold', color='white',
+                path_effects=[PathEffects.withStroke(linewidth=3, foreground='black')],
+                zorder=11,
+            )
+
+        ax.set_xlim(self._x_range)
+        ax.set_ylim(self._y_range)
+        ax.set_aspect('equal')
+
+        fig.savefig(save_path, bbox_inches='tight', dpi=150)
+        plt.close(fig)
+        print(f"  Saved multi-goal trajectory plot to {save_path}")

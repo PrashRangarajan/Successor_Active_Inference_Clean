@@ -295,6 +295,13 @@ class KeyGridworldAdapter(BaseEnvironmentAdapter):
         key_str = "K" if has_key else ""
         return f"({x},{y}){key_str}"
 
+    def get_action_labels(self) -> List[str]:
+        """Return human-readable labels for each action index."""
+        labels = ["\u2190 Left", "\u2192 Right", "\u2191 Up", "\u2193 Down"]
+        if self._n_actions == 5:
+            labels.append("\u2B50 Pickup")
+        return labels
+
     # ==================== Val conversions (for compatibility) ====================
 
     def idx_to_val(self, idx: Tuple[int, int]) -> int:

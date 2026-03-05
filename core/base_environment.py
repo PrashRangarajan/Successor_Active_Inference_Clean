@@ -141,6 +141,73 @@ class BaseEnvironmentAdapter(ABC):
         """
         return self.get_current_state()
 
+    def step_with_info(self, action: int) -> Optional[Tuple]:
+        """Take action and return (state, reward, terminated, truncated, info).
+
+        Override in adapters that wrap Gymnasium environments to provide
+        termination signals. Returns None by default to indicate the adapter
+        does not support extended step info.
+
+        Args:
+            action: Action index
+
+        Returns:
+            Tuple of (state, reward, terminated, truncated, info), or None
+            if not supported.
+        """
+        return None
+
+    def sample_random_state(self) -> Optional[np.ndarray]:
+        """Sample a random state for diverse-start exploration.
+
+        Override in continuous environment adapters to provide uniform
+        coverage of the state space during learning.
+
+        Returns:
+            One-hot encoded state, or None if not supported (default).
+        """
+        return None
+
+    def set_learning_mode(self, is_learning: bool) -> None:
+        """Set whether the adapter is in learning or inference mode.
+
+        Override in POMDP adapters that need different behavior during
+        learning (e.g., resetting belief states).
+
+        Args:
+            is_learning: True for learning phase, False for inference.
+        """
+        pass
+
+    def get_clustering_affinity(self, M: np.ndarray) -> np.ndarray:
+        """Get custom affinity matrix for spectral clustering.
+
+        Override in adapters with periodic or non-standard state spaces
+        (e.g., Pendulum with cylindrical topology) to blend distance
+        information with the successor representation.
+
+        Args:
+            M: Symmetrized successor matrix (valid_states x valid_states).
+
+        Returns:
+            Modified affinity matrix of the same shape, or the input
+            unchanged (default).
+        """
+        return M
+
+    @property
+    def is_continuous(self) -> bool:
+        """Whether this environment has a continuous underlying state space.
+
+        Returns True for environments that discretize continuous observations
+        (MountainCar, Acrobot, Pendulum, CartPole). Returns False for
+        inherently discrete environments (Gridworld).
+
+        Used by the agent to determine smooth-stepping defaults.
+        Override in subclasses; defaults to False.
+        """
+        return False
+
     # ==================== Matrix Operations ====================
 
     @abstractmethod

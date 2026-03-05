@@ -64,6 +64,7 @@ class TrajectoryVizMixin(object):
         velocities: List[float],
         save_path: str = None,
         color_by: str = 'macro_state',
+        macro_action_targets: List = None,
     ):
         """Plot a 2D phase-space trajectory colored by macro state or macro action.
 
@@ -75,6 +76,9 @@ class TrajectoryVizMixin(object):
             save_path: Path to save the figure.
             color_by: 'macro_state' to color by cluster membership (default),
                       'macro_action' to color by target cluster under macro policy.
+            macro_action_targets: Optional list of per-step macro action targets
+                (cluster index or None for goal/micro phase).  When provided and
+                color_by='macro_action', uses these instead of recomputing.
         """
         if save_path is None:
             raise ValueError("save_path is required (e.g. 'figures/mountaincar/trajectory_macro.png')")
@@ -94,17 +98,22 @@ class TrajectoryVizMixin(object):
 
         # Color each point
         for i in range(num_points):
-            obs = np.array([positions[i], velocities[i]])
-            discrete = self.adapter.discretize_obs(obs)
-            s_idx = self.adapter.state_space.state_to_index(discrete)
-
             if color_by == 'macro_action':
-                target = self._get_macro_action_target(s_idx)
+                if macro_action_targets is not None and i < len(macro_action_targets):
+                    target = macro_action_targets[i]
+                else:
+                    obs = np.array([positions[i], velocities[i]])
+                    discrete = self.adapter.discretize_obs(obs)
+                    s_idx = self.adapter.state_space.state_to_index(discrete)
+                    target = self._get_macro_action_target(s_idx)
                 if target is None:
-                    c = goal_color  # In goal cluster
+                    c = goal_color  # In goal cluster / micro phase
                 else:
                     c = macro_colors[target]
             else:
+                obs = np.array([positions[i], velocities[i]])
+                discrete = self.adapter.discretize_obs(obs)
+                s_idx = self.adapter.state_space.state_to_index(discrete)
                 macro = self.micro_to_macro.get(s_idx, 0)
                 c = macro_colors[macro]
 
@@ -116,10 +125,10 @@ class TrajectoryVizMixin(object):
 
         # Legend entries
         if color_by == 'macro_action':
-            plt.scatter([], [], color=goal_color, label='Goal cluster',
+            plt.scatter([], [], color=goal_color, label='Goal',
                         marker="o", s=40, edgecolor='black')
             for i in range(self.n_clusters):
-                plt.scatter([], [], color=macro_colors[i], label=f'→ Cluster {i}',
+                plt.scatter([], [], color=macro_colors[i], label=f'→ {i}',
                             marker="o", s=40, edgecolor='black')
             title = "Trajectory with Macro Actions"
         else:
@@ -136,9 +145,15 @@ class TrajectoryVizMixin(object):
                     color='white', label="End",
                     marker="s", s=60, edgecolor='black', linewidths=1.5, zorder=5)
 
+        # Set axes to full state space extent (not just visited trajectory)
+        if hasattr(self.adapter, 'get_bin_edges'):
+            edges0, edges1 = self.adapter.get_bin_edges()
+            plt.xlim(edges0[0], edges0[-1])
+            plt.ylim(edges1[0], edges1[-1])
+
         plt.xlabel(dim0_label)
         plt.ylabel(dim1_label)
-        plt.title(title)
+        # plt.title(title)
         plt.legend(loc="best", fontsize=8)
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
@@ -217,9 +232,15 @@ class TrajectoryVizMixin(object):
         plt.scatter(pos[-1], vel[-1], s=80, marker='s', facecolors='none',
                     edgecolors='black', linewidths=2, label='End', zorder=5)
 
+        # Set axes to full state space extent (not just visited trajectory)
+        if hasattr(self.adapter, 'get_bin_edges'):
+            edges0, edges1 = self.adapter.get_bin_edges()
+            plt.xlim(edges0[0], edges0[-1])
+            plt.ylim(edges1[0], edges1[-1])
+
         plt.xlabel(dim0_label, fontsize=12)
         plt.ylabel(dim1_label, fontsize=12)
-        plt.title("Trajectory with Actions")
+        # plt.title("Trajectory with Actions")
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
         plt.savefig(save_path, dpi=150)
@@ -370,13 +391,13 @@ class TrajectoryVizMixin(object):
 
         ax.set_xlabel(dim0_label, fontsize=12)
         ax.set_ylabel(dim1_label, fontsize=12)
-        ax.set_title("Macro Action Policy (target cluster)", fontsize=14)
+        # ax.set_title("Macro Action Policy (target cluster)", fontsize=14)
 
         # Legend
-        handles = [mpatches.Patch(color=goal_color, label='Goal cluster')]
+        handles = [mpatches.Patch(color=goal_color, label='Goal')]
         for i in range(self.n_clusters):
             handles.append(mpatches.Patch(color=cluster_colors[i],
-                                          label=f'→ Cluster {i}'))
+                                          label=f'→ {i}'))
         ax.legend(handles=handles, loc='best', fontsize=9)
 
         plt.tight_layout()
@@ -432,47 +453,120 @@ class TrajectoryVizMixin(object):
         pos = np.asarray(positions, dtype=float)
         vel = np.asarray(velocities, dtype=float)
 
-        # Auto-select stages: start, key moments, end
+        # Auto-select stages that tell the physical story.
+        #
+        # For oscillatory trajectories (Pendulum swing-up) we target
+        # 5 stages in the "opposite" half of the phase space:
+        #   (a) Start          — right side, ω=0
+        #   (b) Top-left       — negative pos, high positive ω (upswing)
+        #   (c) Middle-left    — negative pos, ω≈0 (swing peak / turning pt)
+        #   (d) Bottom-left    — negative pos, high negative ω (downswing)
+        #   (e) Goal / end     — near origin
+        #
+        # For non-oscillatory trajectories (Mountain Car) we use 3
+        # stages: start, max-distance mid-point, goal.
         if stage_idx is None:
             stage_idx = [0]
 
-            # 1. Find an interesting mid-trajectory moment:
-            #    - extremum of dim-0 (valley for Mountain Car)
-            #    - or peak |velocity| (max swing speed for Pendulum)
-            extremum_idx = int(np.argmin(pos))
-            if extremum_idx not in (0, T - 1):
-                stage_idx.append(extremum_idx)
-            else:
-                # dim-0 min is at start/end — use peak |velocity| instead
-                peak_vel_idx = int(np.argmax(np.abs(vel)))
-                if peak_vel_idx not in (0, T - 1):
-                    stage_idx.append(peak_vel_idx)
+            pos_range = np.ptp(pos) if np.ptp(pos) > 0 else 1.0
+            vel_range = np.ptp(vel) if np.ptp(vel) > 0 else 1.0
 
-            # 2. Find first time the trajectory enters the goal region
-            #    (e.g., first upright moment for pendulum, reaching x≥0.5 for
-            #    Mountain Car).  Uses the adapter's goal bins when available.
+            # --- Goal / end detection ---------------------------------
             goal_arrival = None
+            search_start = max(1, T // 2)
+
             if hasattr(self.adapter, 'discretize_obs') and hasattr(self, 'goal_states'):
-                for k in range(T):
-                    obs_k = np.array([pos[k], vel[k]])
-                    try:
-                        disc = self.adapter.discretize_obs(obs_k)
-                        s_idx = self.adapter.state_space.state_to_index(disc)
-                        if s_idx in self.goal_states:
-                            goal_arrival = k
-                            break
-                    except Exception:
-                        pass
+                # First check: does the adapter have a continuous terminal check?
+                # If so, find the last frame satisfying it (the actual stopping
+                # point), which is more meaningful than the first goal-bin entry.
+                if hasattr(self.adapter, 'is_terminal'):
+                    for k in range(T - 1, search_start - 1, -1):
+                        saved_obs = getattr(self.adapter, '_current_obs', None)
+                        try:
+                            self.adapter._current_obs = np.array([pos[k], vel[k]])
+                            if self.adapter.is_terminal() is True:
+                                goal_arrival = k
+                                break
+                        except Exception:
+                            pass
+                        finally:
+                            if saved_obs is not None:
+                                self.adapter._current_obs = saved_obs
 
-            if goal_arrival is not None and goal_arrival not in stage_idx and goal_arrival != T - 1:
-                stage_idx.append(goal_arrival)
+                # Fallback: first frame entering a goal bin
+                if goal_arrival is None:
+                    for k in range(search_start, T):
+                        obs_k = np.array([pos[k], vel[k]])
+                        try:
+                            disc = self.adapter.discretize_obs(obs_k)
+                            s_idx = self.adapter.state_space.state_to_index(disc)
+                            if s_idx in self.goal_states:
+                                goal_arrival = k
+                                break
+                        except Exception:
+                            pass
 
-            stage_idx.append(T - 1)
+            if goal_arrival is None:
+                for k in range(search_start, T):
+                    if (abs(pos[k]) < 0.15 * pos_range and
+                            abs(vel[k]) < 0.15 * vel_range):
+                        goal_arrival = k
+                        break
+
+            # --- Oscillatory vs simple trajectory ---------------------
+            n_sign_changes = sum(1 for k in range(1, T)
+                                 if vel[k - 1] * vel[k] < 0)
+
+            lo = max(1, int(T * 0.05))
+            hi = (goal_arrival - 2) if goal_arrival else min(T - 1, int(T * 0.95))
+            hi = max(lo + 1, hi)
+            candidates = list(range(lo, hi))
+
+            if n_sign_changes >= 4 and candidates:
+                # --- Oscillatory: 3 left-half points (top / mid / bottom) ---
+                pos_mid = (np.min(pos) + np.max(pos)) / 2
+
+                # Top-left: negative pos, highest positive ω
+                top_left = [k for k in candidates if pos[k] < pos_mid and vel[k] > 0]
+                if top_left:
+                    stage_idx.append(max(top_left, key=lambda k: vel[k]))
+
+                # Middle-left: ω sign-change (turning point) with negative pos
+                turning_pts = [k for k in range(lo, hi)
+                               if vel[k - 1] * vel[k] <= 0 and pos[k] < pos_mid]
+                if turning_pts:
+                    # Pick the one with smallest |ω| (closest to ω=0)
+                    stage_idx.append(min(turning_pts, key=lambda k: abs(vel[k])))
+
+                # Bottom-left: negative pos, most negative ω
+                bot_left = [k for k in candidates if pos[k] < pos_mid and vel[k] < 0]
+                if bot_left:
+                    stage_idx.append(min(bot_left, key=lambda k: vel[k]))
+
+            elif candidates:
+                # --- Non-oscillatory: single max-distance mid-point ---
+                ref_goal = goal_arrival if goal_arrival else int(T * 0.75)
+
+                def phase_dist(k, ref_k):
+                    dp = (pos[k] - pos[ref_k]) / pos_range
+                    dv = (vel[k] - vel[ref_k]) / vel_range
+                    return dp * dp + dv * dv
+
+                best_k = max(candidates,
+                             key=lambda k: min(phase_dist(k, 0),
+                                               phase_dist(k, ref_goal)))
+                stage_idx.append(best_k)
+
+            # --- Goal / end -------------------------------------------
+            end_idx = goal_arrival if goal_arrival else T - 1
+            if end_idx not in stage_idx:
+                stage_idx.append(end_idx)
         stage_idx = sorted(set(int(i) for i in stage_idx if 0 <= int(i) < T))
         if len(stage_idx) == 0:
             stage_idx = [0]
 
         n = len(stage_idx)
+
         fig = plt.figure(figsize=(4 * n, 7.5))
         gs = GridSpec(2, n, height_ratios=[1, 1.8], hspace=0.25, wspace=0.05)
 
@@ -492,22 +586,42 @@ class TrajectoryVizMixin(object):
                     bbox=dict(boxstyle="round", alpha=0.6),
                 )
 
-        # ---- Phase plot (bottom, spanning all columns) ----
-        ax_phase = fig.add_subplot(gs[1, :])
+        # ---- Phase plot (bottom, centered, ~50% figure width) ----
+        # Use explicit figure-level positioning so the plot is truly centered
+        phase_frac = 0.45  # fraction of figure width
+        phase_left = (1.0 - phase_frac) / 2
+        # Bottom row occupies roughly the lower 55% of the figure
+        phase_bottom = 0.06
+        phase_height = 0.42
+        ax_phase = fig.add_axes([phase_left, phase_bottom, phase_frac, phase_height])
         t = np.arange(T)
         ax_phase.scatter(pos, vel, c=t, s=18, cmap="plasma")
         ax_phase.plot(pos, vel, linewidth=1, color="gray", alpha=0.4)
 
+        # Set axes to full state space extent
+        if hasattr(self.adapter, 'get_bin_edges'):
+            edges0, edges1 = self.adapter.get_bin_edges()
+            ax_phase.set_xlim(edges0[0], edges0[-1])
+            ax_phase.set_ylim(edges1[0], edges1[-1])
+
         ax_phase.set_xlabel(dim0_label)
         ax_phase.set_ylabel(dim1_label)
-        ax_phase.set_title("Trajectory in state space")
+        # ax_phase.set_title("Trajectory in state space")
 
         # Highlight chosen stages
+        xlim = ax_phase.get_xlim()
+        x_mid = (xlim[0] + xlim[1]) / 2
         for j, idx in enumerate(stage_idx):
             ax_phase.scatter(pos[idx], vel[idx], s=160, facecolors="none",
                              linewidths=3, edgecolors="black")
-            ax_phase.text(pos[idx], vel[idx], f"  ({chr(97 + j)})",
-                          fontsize=14, va="center")
+            # Place label on the side with more room
+            label = f"({chr(97 + j)})"
+            if pos[idx] > x_mid:
+                ax_phase.text(pos[idx], vel[idx], f"{label}  ",
+                              fontsize=14, va="center", ha="right")
+            else:
+                ax_phase.text(pos[idx], vel[idx], f"  {label}",
+                              fontsize=14, va="center", ha="left")
 
         # Start / end markers
         ax_phase.scatter(pos[0], vel[0], s=70, marker="o", edgecolors="black")
@@ -527,6 +641,7 @@ class TrajectoryVizMixin(object):
         save_path: str = None,
         fps: int = 30,
         color_by: str = 'macro_action',
+        macro_action_targets: List = None,
     ):
         """Generate a vertically stacked video: environment render (top) + animated trajectory (bottom).
 
@@ -540,6 +655,8 @@ class TrajectoryVizMixin(object):
             fps: Frames per second for the output video.
             color_by: 'macro_state' to color by cluster membership,
                       'macro_action' to color by target cluster under macro policy (default).
+            macro_action_targets: Optional list of per-step macro action targets
+                (cluster index or None for goal/micro phase).
         """
         if save_path is None:
             raise ValueError("save_path is required (e.g. 'figures/mountaincar/combined_vertical.mp4')")
@@ -566,14 +683,19 @@ class TrajectoryVizMixin(object):
 
         point_color_indices = []  # int cluster index, or -1 for goal
         for i in range(T):
-            obs = np.array([pos[i], vel[i]])
-            discrete = self.adapter.discretize_obs(obs)
-            s_idx = self.adapter.state_space.state_to_index(discrete)
-
-            if color_by == 'macro_action':
+            if color_by == 'macro_action' and macro_action_targets is not None and i < len(macro_action_targets):
+                target = macro_action_targets[i]
+                point_color_indices.append(target if target is not None else -1)
+            elif color_by == 'macro_action':
+                obs = np.array([pos[i], vel[i]])
+                discrete = self.adapter.discretize_obs(obs)
+                s_idx = self.adapter.state_space.state_to_index(discrete)
                 target = self._get_macro_action_target(s_idx)
                 point_color_indices.append(target if target is not None else -1)
             else:
+                obs = np.array([pos[i], vel[i]])
+                discrete = self.adapter.discretize_obs(obs)
+                s_idx = self.adapter.state_space.state_to_index(discrete)
                 point_color_indices.append(self.micro_to_macro.get(s_idx, 0))
 
         def _idx_to_color(idx):
@@ -615,10 +737,10 @@ class TrajectoryVizMixin(object):
             ax.set_ylim(ylim)
             ax.set_xlabel(dim0_label, fontsize=10)
             ax.set_ylabel(dim1_label, fontsize=10)
-            if color_by == 'macro_action':
-                ax.set_title("Trajectory with macro actions", fontsize=12)
-            else:
-                ax.set_title("Trajectory with macro states", fontsize=12)
+            # if color_by == 'macro_action':
+            #     ax.set_title("Trajectory with macro actions", fontsize=12)
+            # else:
+            #     ax.set_title("Trajectory with macro states", fontsize=12)
 
             # Add legend for colors seen so far
             seen = set()
@@ -792,8 +914,9 @@ class TrajectoryVizMixin(object):
         For each macro state transition, shows the micro-level actions
         that would be taken to reach the bottleneck state.
 
-        For augmented state spaces (e.g., key gridworld), creates separate
-        panels for each augment value (No Key / Has Key).
+        For grid environments: arrow plots on the grid.
+        For 2D binned continuous environments (Mountain Car, Pendulum):
+        heatmaps showing best micro action at each (dim0, dim1) cell.
 
         Args:
             save_dir: Directory to save figures (e.g. 'figures/gridworld/macro_action_network')
@@ -802,8 +925,15 @@ class TrajectoryVizMixin(object):
             raise ValueError("save_dir is required (e.g. 'figures/gridworld/macro_action_network')")
         os.makedirs(save_dir, exist_ok=True)
 
+        # Route to the appropriate method based on environment type
+        if hasattr(self.adapter, 'state_space') and \
+           hasattr(self.adapter.state_space, 'n_bins_per_dim') and \
+           not hasattr(self.adapter, 'grid_size'):
+            self._visualize_policy_binned_2d(save_dir)
+            return
+
         if not hasattr(self.adapter, 'grid_size'):
-            print("Policy visualization requires grid-based environment")
+            print("Policy visualization requires grid-based or 2D binned environment")
             return
 
         # Clear old images
@@ -897,6 +1027,242 @@ class TrajectoryVizMixin(object):
                                             f"{save_dir}/Macro_Action_Network_{macro_state}_{macro_final_state}.png",
                                             f"Macro Action Policy: {macro_state} -> {macro_final_state}")
 
+    def _visualize_policy_binned_2d(self, save_dir: str):
+        """Visualize macro action micro-policies for 2D binned environments.
+
+        For each macro transition (cluster A → cluster B), creates a heatmap
+        showing the best micro action at each (dim0, dim1) cell when the agent
+        is navigating toward the bottleneck of that transition.  Only cells
+        belonging to the source cluster are coloured; other cells are grayed out.
+        """
+        import matplotlib.colors as mcolors
+        import matplotlib.patheffects as PathEffects
+
+        bins = self.adapter.state_space.n_bins_per_dim
+        if len(bins) != 2:
+            print("  Policy visualization only supports 2D binned state spaces")
+            return
+
+        # Clear old images
+        for filename in glob.glob(f"{save_dir}/Macro_Action_Network_*"):
+            os.remove(filename)
+
+        # Axis labels and extent
+        if hasattr(self.adapter, 'get_dimension_labels'):
+            dim0_label, dim1_label = self.adapter.get_dimension_labels()
+        else:
+            dim0_label, dim1_label = "Dim 0", "Dim 1"
+
+        has_edges = hasattr(self.adapter, 'get_bin_edges')
+        if has_edges:
+            edges0, edges1 = self.adapter.get_bin_edges()
+            extent = [edges0[0], edges0[-1], edges1[0], edges1[-1]]
+        else:
+            extent = None
+
+        has_centers = hasattr(self.adapter, 'get_bin_centers')
+        if has_centers:
+            centers0, centers1 = self.adapter.get_bin_centers()
+
+        # Action labels and colours
+        if hasattr(self.adapter, 'get_action_labels'):
+            action_labels = self.adapter.get_action_labels()
+        else:
+            action_labels = [str(i) for i in range(self.adapter.n_actions)]
+        n_actions = self.adapter.n_actions
+
+        # Build cluster background heatmap (same colouring as Macro_s.png)
+        tab_cmap = plt.get_cmap("tab10")
+        cluster_colors = [tab_cmap(i) for i in range(self.n_clusters)]
+        unassigned_color = (0.85, 0.85, 0.85, 1.0)
+
+        labels = np.ones(self.adapter.n_states, dtype=int) * self.n_clusters
+        for micro_idx, macro_idx in self.micro_to_macro.items():
+            labels[micro_idx] = macro_idx
+        labels_grid = labels.reshape(bins[0], bins[1])
+
+        bg_colors = cluster_colors + [unassigned_color]
+        bg_cmap = mcolors.ListedColormap(bg_colors)
+        bg_bounds = np.arange(-0.5, self.n_clusters + 1.5, 1)
+        bg_norm = mcolors.BoundaryNorm(bg_bounds, bg_cmap.N)
+
+        # Arrow symbols mapped by action index.
+        # Mountain Car: 0=left, 1=no-op, 2=right
+        # Generic fallback uses horizontal arrows for first/last, dot for middle.
+        arrow_dx = {}
+        noop_actions = set()
+        for i in range(n_actions):
+            label_lower = action_labels[i].lower().strip()
+            # Check diagonals FIRST (before cardinals, since "ne" contains "e")
+            if label_lower.endswith('ne') or 'northeast' in label_lower:
+                arrow_dx[i] = (1, 1)
+            elif label_lower.endswith('nw') or 'northwest' in label_lower:
+                arrow_dx[i] = (-1, 1)
+            elif label_lower.endswith('se') or 'southeast' in label_lower:
+                arrow_dx[i] = (1, -1)
+            elif label_lower.endswith('sw') or 'southwest' in label_lower:
+                arrow_dx[i] = (-1, -1)
+            elif 'left' in label_lower or label_lower.endswith(' w') or label_lower.endswith(' w)'):
+                arrow_dx[i] = (-1, 0)
+            elif 'right' in label_lower or label_lower.endswith(' e') or label_lower.endswith(' e)'):
+                arrow_dx[i] = (1, 0)
+            elif 'up' in label_lower or label_lower.endswith(' n') or label_lower.endswith(' n)'):
+                arrow_dx[i] = (0, 1)
+            elif 'down' in label_lower or label_lower.endswith(' s') or label_lower.endswith(' s)'):
+                arrow_dx[i] = (0, -1)
+            else:
+                noop_actions.add(i)
+
+        # Compute pixel-centre positions that exactly match imshow cell centres.
+        # imshow with extent places N pixels so that pixel i is centred at
+        #   extent_lo + (i + 0.5) * cell_width
+        if extent is not None:
+            dx_cell = (extent[1] - extent[0]) / bins[0]
+            dy_cell = (extent[3] - extent[2]) / bins[1]
+            pix_x = np.array([extent[0] + (i + 0.5) * dx_cell for i in range(bins[0])])
+            pix_y = np.array([extent[2] + (j + 0.5) * dy_cell for j in range(bins[1])])
+        else:
+            dx_cell = 1.0
+            dy_cell = 1.0
+            pix_x = np.arange(bins[0], dtype=float)
+            pix_y = np.arange(bins[1], dtype=float)
+        arrow_scale = 0.3  # fraction of cell size
+
+        for macro_state in range(self.n_clusters):
+            if macro_state not in self.adj_list:
+                continue
+
+            for macro_final_state in self.adj_list[macro_state]:
+                bottleneck = self.bottleneck_states.get(
+                    (macro_state, macro_final_state), [])
+                if not bottleneck:
+                    bottleneck = self.macro_state_list[macro_final_state]
+                if not bottleneck:
+                    continue
+
+                # Create temporary value function toward bottleneck
+                C_temp = self.adapter.create_goal_prior(
+                    bottleneck, reward=10.0, default_cost=0.0)
+                V = self.adapter.multiply_M_C(self.M, C_temp)
+
+                # Compute best action for each source cluster member
+                action_grid = np.full((bins[0], bins[1]), -1, dtype=int)
+                source_members = set(self.macro_state_list[macro_state])
+
+                for s_idx in source_members:
+                    state_tuple = self.adapter.state_space.index_to_state(s_idx)
+                    s_onehot = self.adapter.index_to_onehot(s_idx)
+                    V_adj = []
+                    for act in range(n_actions):
+                        s_next = self.adapter.multiply_B_s(self.B, s_onehot, act)
+                        next_idx = self.adapter.onehot_to_index(s_next)
+                        V_adj.append(V[next_idx])
+                    action_grid[state_tuple] = int(np.argmax(V_adj))
+
+                # ---- Plot: cluster background + arrow/symbol overlay ----
+                fig, ax = plt.subplots(figsize=(7, 5.5))
+                ax.imshow(
+                    labels_grid.T,
+                    aspect='auto', origin='lower', extent=extent,
+                    interpolation='nearest',
+                    cmap=bg_cmap, norm=bg_norm, alpha=0.5,
+                )
+
+                # Draw arrows / symbols on source cluster cells
+                for i in range(bins[0]):
+                    for j in range(bins[1]):
+                        act = action_grid[i, j]
+                        if act == -1:
+                            continue
+                        cx, cy = pix_x[i], pix_y[j]
+
+                        if act in arrow_dx:
+                            adx, ady = arrow_dx[act]
+                            ax.annotate(
+                                '',
+                                xy=(cx + arrow_scale * adx * dx_cell,
+                                    cy + arrow_scale * ady * dy_cell),
+                                xytext=(cx - arrow_scale * adx * dx_cell,
+                                        cy - arrow_scale * ady * dy_cell),
+                                arrowprops=dict(arrowstyle='->', color='white',
+                                                lw=1.8, mutation_scale=12),
+                                zorder=5,
+                            )
+                        else:
+                            # No-op / neutral action → dot
+                            ax.plot(cx, cy, marker='.', markersize=6,
+                                    color='white', zorder=5)
+
+                # Mark bottleneck states with ★
+                for bn in bottleneck:
+                    bn_tuple = self.adapter.state_space.index_to_state(bn)
+                    bx, by = pix_x[bn_tuple[0]], pix_y[bn_tuple[1]]
+                    ax.plot(bx, by, marker='*', markersize=14,
+                            color='black', markeredgecolor='white',
+                            markeredgewidth=0.8, zorder=10)
+
+                # Subsampled tick labels
+                if has_centers:
+                    max_ticks = 7
+                    tp0 = np.linspace(extent[0], extent[1], bins[0]) if extent else np.arange(bins[0])
+                    tp1 = np.linspace(extent[2], extent[3], bins[1]) if extent else np.arange(bins[1])
+                    step0 = max(1, len(tp0) // max_ticks)
+                    step1 = max(1, len(tp1) // max_ticks)
+                    idx0 = np.arange(0, len(tp0), step0)
+                    idx1 = np.arange(0, len(tp1), step1)
+                    ax.set_xticks(tp0[idx0])
+                    ax.set_xticklabels(np.round(centers0[idx0], 2))
+                    ax.set_yticks(tp1[idx1])
+                    ax.set_yticklabels(np.round(centers1[idx1], 2))
+
+                ax.set_xlabel(dim0_label, fontsize=12)
+                ax.set_ylabel(dim1_label, fontsize=12)
+
+                # Legend: cluster colours + action symbols
+                legend_handles = []
+                # Cluster patches
+                for c in range(self.n_clusters):
+                    legend_handles.append(mpatches.Patch(
+                        color=cluster_colors[c], alpha=0.5,
+                        label=f'Cluster {c}'))
+                # Action symbols
+                # Map arrow directions to distinct LaTeX symbols
+                _arrow_sym = {
+                    (1, 0): r'$\rightarrow$',
+                    (-1, 0): r'$\leftarrow$',
+                    (0, 1): r'$\uparrow$',
+                    (0, -1): r'$\downarrow$',
+                    (1, 1): r'$\nearrow$',
+                    (-1, 1): r'$\nwarrow$',
+                    (1, -1): r'$\searrow$',
+                    (-1, -1): r'$\swarrow$',
+                }
+                for i in range(n_actions):
+                    if i in arrow_dx:
+                        sym = _arrow_sym.get(arrow_dx[i], '.')
+                        legend_handles.append(plt.Line2D(
+                            [0], [0], marker=sym,
+                            color='w', markerfacecolor='black', markersize=10,
+                            label=action_labels[i], linestyle='None'))
+                    else:
+                        legend_handles.append(plt.Line2D(
+                            [0], [0], marker='.', color='w',
+                            markerfacecolor='black', markersize=10,
+                            label=action_labels[i], linestyle='None'))
+                # Bottleneck symbol
+                legend_handles.append(plt.Line2D(
+                    [0], [0], marker='*', color='w',
+                    markerfacecolor='black', markeredgecolor='white',
+                    markersize=12, label='Bottleneck', linestyle='None'))
+                ax.legend(handles=legend_handles, loc='best', fontsize=8)
+
+                fname = f"Macro_Action_Network_{macro_state}_{macro_final_state}.png"
+                plt.tight_layout()
+                plt.savefig(f"{save_dir}/{fname}", dpi=150, bbox_inches='tight')
+                plt.close()
+
+        print(f"  Saved macro action policy plots to {save_dir}/")
+
     def _plot_policy_arrows(self, arrows_grid: np.ndarray, grid_size: int,
                             save_path: str, title: str):
         """Plot policy arrows on grid.
@@ -904,30 +1270,32 @@ class TrajectoryVizMixin(object):
         Actions: 0=left, 1=right, 2=up, 3=down, 4=pickup (shown as 'X')
         """
         arrows = {1: (1, 0), 0: (-1, 0), 3: (0, 1), 2: (0, -1)}
-        scale = 0.25
+        offset = 0.3  # half-length of arrow
 
         fig, ax = plt.subplots(figsize=(grid_size, grid_size))
 
         for r, row in enumerate(arrows_grid):
             for c, cell in enumerate(row):
                 if cell in arrows:
-                    ax.arrow(c - scale * arrows[cell][0],
-                             r - scale * arrows[cell][1],
-                             scale * arrows[cell][0],
-                             scale * arrows[cell][1],
-                             head_width=0.15, color='w')
+                    dx, dy = arrows[cell]
+                    ax.annotate('',
+                                xy=(c + offset * dx, r + offset * dy),
+                                xytext=(c - offset * dx, r - offset * dy),
+                                arrowprops=dict(arrowstyle='->', color='w',
+                                                lw=2, mutation_scale=15))
                 elif cell == 4:  # Pickup action
                     ax.text(c, r, 'X', fontsize=14, ha='center', va='center',
                             fontweight='bold', color='w')
 
         if self.labels_grid is not None:
-            im = plt.imshow(self.labels_grid, cmap='gist_heat')
-            colours = im.cmap(im.norm(np.unique(self.labels_grid)))
+            cmap_d, norm_d = self._cluster_cmap_and_norm()
+            im = plt.imshow(self.labels_grid, cmap=cmap_d, norm=norm_d)
+            colours = self._cluster_colours()
             patches = [mpatches.Patch(color=colours[i], label=f'{i}')
-                       for i in range(len(colours) - 1)]
+                       for i in range(self.n_clusters)]
             plt.legend(handles=patches, bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
 
-        plt.title(title, fontsize=16)
+        # plt.title(title, fontsize=16)
         plt.savefig(save_path, format="png", bbox_inches='tight')
         plt.close()
 
@@ -945,9 +1313,9 @@ class TrajectoryVizMixin(object):
             title: Main title for the figure
         """
         arrows = {1: (1, 0), 0: (-1, 0), 3: (0, 1), 2: (0, -1)}
-        scale = 0.25
+        offset = 0.3  # half-length of arrow
 
-        aug_labels = ["✗ No Key", "★ Has Key"] if n_augment == 2 else [f"Aug {i}" for i in range(n_augment)]
+        aug_labels = ["✗ Without key", "★ With key"] if n_augment == 2 else [f"Aug {i}" for i in range(n_augment)]
 
         fig, axes = plt.subplots(1, n_augment, figsize=(grid_size * n_augment + 2, grid_size))
         if n_augment == 1:
@@ -958,11 +1326,12 @@ class TrajectoryVizMixin(object):
             for r, row in enumerate(arrows_grid):
                 for c, cell in enumerate(row):
                     if cell in arrows:
-                        ax.arrow(c - scale * arrows[cell][0],
-                                r - scale * arrows[cell][1],
-                                scale * arrows[cell][0],
-                                scale * arrows[cell][1],
-                                head_width=0.15, color='w')
+                        dx, dy = arrows[cell]
+                        ax.annotate('',
+                                    xy=(c + offset * dx, r + offset * dy),
+                                    xytext=(c - offset * dx, r - offset * dy),
+                                    arrowprops=dict(arrowstyle='->', color='w',
+                                                    lw=2, mutation_scale=15))
                     elif cell == 4:  # Pickup action
                         ax.text(c, r, 'X', fontsize=14, ha='center', va='center',
                                 fontweight='bold', color='w')
@@ -982,7 +1351,8 @@ class TrajectoryVizMixin(object):
                                 x, y = divmod(base_idx, grid_size)
                                 cluster_grid[x, y] = macro_idx
 
-                ax.imshow(cluster_grid.T, cmap='gist_heat')
+                cmap_d, norm_d = self._cluster_cmap_and_norm()
+                ax.imshow(cluster_grid.T, cmap=cmap_d, norm=norm_d)
             else:
                 # Just show a blank grid
                 ax.imshow(np.zeros((grid_size, grid_size)), cmap='gray')
@@ -992,12 +1362,12 @@ class TrajectoryVizMixin(object):
             ax.set_yticks(np.arange(grid_size))
 
         # Add legend
-        colours = plt.cm.gist_heat(np.linspace(0, 0.8, self.n_clusters))
-        patches = [mpatches.Patch(color=colours[i], label=f'Cluster {i}')
+        colours = self._cluster_colours()
+        patches = [mpatches.Patch(color=colours[i], label=f'{i}')
                    for i in range(self.n_clusters)]
         fig.legend(handles=patches, loc='center right', borderaxespad=0.5)
 
-        fig.suptitle(title, fontsize=16)
+        # fig.suptitle(title, fontsize=16)
         plt.tight_layout()
         plt.savefig(save_path, format="png", bbox_inches='tight')
         plt.close()
@@ -1165,10 +1535,10 @@ class TrajectoryVizMixin(object):
             if is_augmented:
                 hk = has_key_history[i]
                 if hk == 1:
-                    key_str = '★ Has Key'
+                    key_str = '★ With key'
                     title_color = '#00BFFF'
                 else:
-                    key_str = '✗ No Key'
+                    key_str = '✗ Without key'
                     title_color = '#FFA500'
                 title_text.set_text(f'Step {i}/{len(state_locs)-1}  |  {key_str}')
                 title_text.set_color(title_color)

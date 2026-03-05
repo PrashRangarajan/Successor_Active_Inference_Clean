@@ -20,57 +20,6 @@ class POMDPVizMixin(object):
     - self.goal_states: Goal state indices
     """
 
-    # ==================== Value Function Visualization ====================
-
-    def visualize_value_function(self, save_path: str = None):
-        """Visualize the value function on the grid.
-
-        Args:
-            save_path: Path to save the figure (e.g. 'figures/gridworld/value_function.png')
-        """
-        if save_path is None:
-            raise ValueError("save_path is required (e.g. 'figures/gridworld/value_function.png')")
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-
-        if not hasattr(self.adapter, 'grid_size'):
-            print("Value function visualization requires grid-based environment")
-            return
-
-        if self.M is None or self.C is None:
-            print("No learned M or C to visualize")
-            return
-
-        grid_size = self.adapter.grid_size
-        V = self.adapter.multiply_M_C(self.M, self.C)
-
-        # Handle augmented state space - take max over key states
-        if V.shape[0] != grid_size ** 2:
-            # Probably augmented - reshape and take max
-            n_base = grid_size ** 2
-            if V.shape[0] == 2 * n_base:
-                V = np.maximum(V[:n_base], V[n_base:])
-
-        V_grid = V.reshape(grid_size, grid_size).T
-
-        plt.figure(figsize=(10, 8))
-        plt.imshow(V_grid, cmap='viridis')
-        plt.colorbar(label='Value')
-        plt.title('Value Function V = M @ C', fontsize=16)
-        plt.xticks(np.arange(grid_size))
-        plt.yticks(np.arange(grid_size))
-
-        # Mark goal
-        if self.goal_states:
-            for gs in self.goal_states:
-                loc = self.adapter.render_state(gs)
-                plt.scatter(loc[0], loc[1], color='red', s=200, marker='*',
-                           label='Goal' if gs == self.goal_states[0] else '')
-
-        plt.legend()
-        plt.savefig(save_path, bbox_inches='tight')
-        plt.close()
-        print(f"Value function saved to {save_path}")
-
     # ==================== POMDP Visualization ====================
 
     def _is_pomdp(self) -> bool:

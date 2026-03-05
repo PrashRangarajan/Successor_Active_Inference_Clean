@@ -1,0 +1,101 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
+\newlabel{sec:intro}{{1}{1}{Introduction}{section.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {2}Environment Description}{2}{section.2}\protected@file@percent }
+\newlabel{sec:environment}{{2}{2}{Environment Description}{section.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}PointMaze from Gymnasium-Robotics}{2}{subsection.2.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Maze Variants}{2}{subsection.2.2}\protected@file@percent }
+\newlabel{sec:maze_variants}{{2.2}{2}{Maze Variants}{subsection.2.2}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces PointMaze variant specifications. \emph  {Grid} refers to the maze cell layout; \emph  {Bins} to the discretization resolution; \emph  {Navigable} to the number of non-wall bins (approximate).}}{2}{table.caption.1}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{tab:maze_variants}{{1}{2}{PointMaze variant specifications. \emph {Grid} refers to the maze cell layout; \emph {Bins} to the discretization resolution; \emph {Navigable} to the number of non-wall bins (approximate)}{table.caption.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}Goal Configurations}{3}{subsection.2.3}\protected@file@percent }
+\newlabel{sec:goal_configs}{{2.3}{3}{Goal Configurations}{subsection.2.3}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {3}Motivation: Why PointMaze for Hierarchical Active Inference}{3}{section.3}\protected@file@percent }
+\newlabel{sec:motivation}{{3}{3}{Motivation: Why PointMaze for Hierarchical Active Inference}{section.3}{}}
+\@writefile{toc}{\contentsline {paragraph}{Natural bottleneck structure.}{3}{section*.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Continuous state space with discrete structure.}{3}{section*.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Scalable complexity.}{3}{section*.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Replanning as a first-class capability.}{3}{section*.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Physics-based dynamics.}{3}{section*.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4}Model Description}{4}{section.4}\protected@file@percent }
+\newlabel{sec:model}{{4}{4}{Model Description}{section.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}State Discretization}{4}{subsection.4.1}\protected@file@percent }
+\newlabel{sec:discretization}{{4.1}{4}{State Discretization}{subsection.4.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Action Discretization}{4}{subsection.4.2}\protected@file@percent }
+\newlabel{sec:actions}{{4.2}{4}{Action Discretization}{subsection.4.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Smooth Stepping}{4}{subsection.4.3}\protected@file@percent }
+\newlabel{sec:smooth_stepping}{{4.3}{4}{Smooth Stepping}{subsection.4.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4}Successor Representation Learning}{5}{subsection.4.4}\protected@file@percent }
+\newlabel{sec:sr_learning}{{4.4}{5}{Successor Representation Learning}{subsection.4.4}{}}
+\newlabel{eq:sr_def}{{3}{5}{Successor Representation Learning}{equation.3}{}}
+\newlabel{eq:td_update}{{4}{5}{Successor Representation Learning}{equation.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.5}Hierarchical Structure Discovery}{5}{subsection.4.5}\protected@file@percent }
+\newlabel{sec:hierarchy}{{4.5}{5}{Hierarchical Structure Discovery}{subsection.4.5}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.5.1}Spectral Clustering of the SR}{5}{subsubsection.4.5.1}\protected@file@percent }
+\newlabel{eq:affinity_blend}{{5}{5}{Spectral Clustering of the SR}{equation.5}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.5.2}Macro-States and Bottleneck States}{5}{subsubsection.4.5.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.5.3}Macro-Level Transition and Successor Matrices}{6}{subsubsection.4.5.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.6}Value Computation and Action Selection}{6}{subsection.4.6}\protected@file@percent }
+\newlabel{sec:value_action}{{4.6}{6}{Value Computation and Action Selection}{subsection.4.6}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.6.1}Goal Preference Vector}{6}{subsubsection.4.6.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.6.2}Value Function}{6}{subsubsection.4.6.2}\protected@file@percent }
+\newlabel{eq:value}{{8}{6}{Value Function}{equation.8}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.6.3}Micro-Level Action Selection}{6}{subsubsection.4.6.3}\protected@file@percent }
+\newlabel{eq:action_select}{{9}{6}{Micro-Level Action Selection}{equation.9}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.6.4}Macro-Level Action Selection}{6}{subsubsection.4.6.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.7}Two-Phase Hierarchical Navigation}{7}{subsection.4.7}\protected@file@percent }
+\newlabel{sec:two_phase}{{4.7}{7}{Two-Phase Hierarchical Navigation}{subsection.4.7}{}}
+\@writefile{toc}{\contentsline {paragraph}{Phase 1: Macro navigation.}{7}{section*.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Phase 2: Micro fine-tuning.}{7}{section*.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.8}Flat Planning Baseline}{7}{subsection.4.8}\protected@file@percent }
+\newlabel{sec:flat}{{4.8}{7}{Flat Planning Baseline}{subsection.4.8}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Hyperparameters and Configuration}{7}{section.5}\protected@file@percent }
+\newlabel{sec:hyperparams}{{5}{7}{Hyperparameters and Configuration}{section.5}{}}
+\@writefile{toc}{\contentsline {paragraph}{Training budget rationale.}{7}{section*.10}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Episode budget split.}{7}{section*.11}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {6}Results}{7}{section.6}\protected@file@percent }
+\newlabel{sec:results}{{6}{7}{Results}{section.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}UMaze: Single-Goal Navigation}{7}{subsection.6.1}\protected@file@percent }
+\newlabel{sec:umaze_single}{{6.1}{7}{UMaze: Single-Goal Navigation}{subsection.6.1}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Hyperparameter configuration for each PointMaze variant. Shared parameters: learning rate $\alpha = 0.05$, replay enabled with 10 epochs, replay learning rate $= \alpha /2$.}}{8}{table.caption.9}\protected@file@percent }
+\newlabel{tab:hyperparams}{{2}{8}{Hyperparameter configuration for each PointMaze variant. Shared parameters: learning rate $\alpha = 0.05$, replay enabled with 10 epochs, replay learning rate $= \alpha /2$}{table.caption.9}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces \textbf  {UMaze macro-state clusters.} Four clusters (colored regions) discovered by spectral clustering of the SR, overlaid on the maze layout (dark cells = walls). Arrows show the macro-level policy directing navigation from start to goal (gold star). Numbers label each macro-state.}}{8}{figure.caption.12}\protected@file@percent }
+\newlabel{fig:umaze_clusters}{{1}{8}{\textbf {UMaze macro-state clusters.} Four clusters (colored regions) discovered by spectral clustering of the SR, overlaid on the maze layout (dark cells = walls). Arrows show the macro-level policy directing navigation from start to goal (gold star). Numbers label each macro-state}{figure.caption.12}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}UMaze: Trajectory Analysis}{9}{subsection.6.2}\protected@file@percent }
+\newlabel{sec:umaze_trajectory}{{6.2}{9}{UMaze: Trajectory Analysis}{subsection.6.2}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces \textbf  {Hierarchical trajectory on UMaze.} The agent navigates from start (top-left) to goal (bottom-left) through the U-shaped corridor. (a) Segments colored by the macro-state (room) the agent occupies. (b) Segments colored by the macro-action being executed (which room-to-room transition is active).}}{9}{figure.caption.13}\protected@file@percent }
+\newlabel{fig:umaze_trajectory}{{2}{9}{\textbf {Hierarchical trajectory on UMaze.} The agent navigates from start (top-left) to goal (bottom-left) through the U-shaped corridor. (a) Segments colored by the macro-state (room) the agent occupies. (b) Segments colored by the macro-action being executed (which room-to-room transition is active)}{figure.caption.13}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces \textbf  {Stage-state diagram for UMaze.} Rendered frames (top) and corresponding trajectory segments (bottom) showing the macro-level execution stages. Each stage corresponds to a macro-action (room-to-room navigation).}}{10}{figure.caption.14}\protected@file@percent }
+\newlabel{fig:umaze_stages}{{3}{10}{\textbf {Stage-state diagram for UMaze.} Rendered frames (top) and corresponding trajectory segments (bottom) showing the macro-level execution stages. Each stage corresponds to a macro-action (room-to-room navigation)}{figure.caption.14}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Planning Cost Analysis and Flat Failure}{10}{subsection.6.3}\protected@file@percent }
+\newlabel{sec:planning_cost}{{6.3}{10}{Planning Cost Analysis and Flat Failure}{subsection.6.3}{}}
+\@writefile{toc}{\contentsline {paragraph}{Vanishing value gradient.}{10}{section*.15}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Hierarchical multi-scale gradients.}{10}{section*.16}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces \textbf  {Planning cost comparison for UMaze.} (a) On the worst-case start--goal pair (maximum corridor distance), the hierarchical agent reaches the goal in 4 planning decisions (3 macro room-to-room transitions + 1 micro fine-tuning phase), while the flat agent exhausts all 5000 physics steps without reaching the goal due to vanishing value gradients. (b) Replanning cost when the goal changes: $k^2 = 16$ MACs for recomputing $\mathbf  {V}_{\text  {macro}}$ versus $N_v^2 \approx 12{,}544$ MACs for recomputing $\mathbf  {V}$---a $784\times $ reduction.}}{11}{figure.caption.17}\protected@file@percent }
+\newlabel{fig:umaze_planning}{{4}{11}{\textbf {Planning cost comparison for UMaze.} (a) On the worst-case start--goal pair (maximum corridor distance), the hierarchical agent reaches the goal in 4 planning decisions (3 macro room-to-room transitions + 1 micro fine-tuning phase), while the flat agent exhausts all 5000 physics steps without reaching the goal due to vanishing value gradients. (b) Replanning cost when the goal changes: $k^2 = 16$ MACs for recomputing $\Vmacro $ versus $N_v^2 \approx 12{,}544$ MACs for recomputing $\V $---a $784\times $ reduction}{figure.caption.17}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.4}Multi-Goal Replanning}{11}{subsection.6.4}\protected@file@percent }
+\newlabel{sec:replan}{{6.4}{11}{Multi-Goal Replanning}{subsection.6.4}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces \textbf  {Multi-goal replanning trajectories.} Each panel shows the maze with cluster coloring (faded) and overlaid goal-reaching trajectories (colored paths with numbered goal stars). The agent learns the environment once, then navigates to a sequence of goals without relearning. (a) UMaze with 5 goals spanning all rooms. (b) Medium with 5 goals at corners and center. (c) Large with 6 goals spanning the full maze.}}{12}{figure.caption.18}\protected@file@percent }
+\newlabel{fig:replan_all}{{5}{12}{\textbf {Multi-goal replanning trajectories.} Each panel shows the maze with cluster coloring (faded) and overlaid goal-reaching trajectories (colored paths with numbered goal stars). The agent learns the environment once, then navigates to a sequence of goals without relearning. (a) UMaze with 5 goals spanning all rooms. (b) Medium with 5 goals at corners and center. (c) Large with 6 goals spanning the full maze}{figure.caption.18}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces \textbf  {Macro-state clusters with all goal locations.} Numbered stars indicate the sequential goals used in replanning experiments. Clusters correspond to spatially coherent maze regions (rooms, corridor segments).}}{12}{figure.caption.19}\protected@file@percent }
+\newlabel{fig:replan_clusters}{{6}{12}{\textbf {Macro-state clusters with all goal locations.} Numbered stars indicate the sequential goals used in replanning experiments. Clusters correspond to spatially coherent maze regions (rooms, corridor segments)}{figure.caption.19}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces \textbf  {Per-goal step comparison: Hierarchy vs.\ Flat.} Bar charts showing the number of physics steps to reach each sequential goal. Red crosses indicate failure to reach the goal within the step limit. The hierarchical agent (blue) generally reaches goals faster than the flat agent (orange), with greater advantage on longer paths.}}{13}{figure.caption.20}\protected@file@percent }
+\newlabel{fig:replan_steps}{{7}{13}{\textbf {Per-goal step comparison: Hierarchy vs.\ Flat.} Bar charts showing the number of physics steps to reach each sequential goal. Red crosses indicate failure to reach the goal within the step limit. The hierarchical agent (blue) generally reaches goals faster than the flat agent (orange), with greater advantage on longer paths}{figure.caption.20}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.5}Systematic Evaluation: Learning Curves}{13}{subsection.6.5}\protected@file@percent }
+\newlabel{sec:eval}{{6.5}{13}{Systematic Evaluation: Learning Curves}{subsection.6.5}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {8}{\ignorespaces \textbf  {Systematic evaluation on UMaze: Hierarchy vs.\ Flat.} Each point averages over multiple random seeds with standard error bands. (a) Success rate vs.\ training episodes. (b) Steps to reach the goal vs.\ training episodes.}}{13}{figure.caption.21}\protected@file@percent }
+\newlabel{fig:eval_curves}{{8}{13}{\textbf {Systematic evaluation on UMaze: Hierarchy vs.\ Flat.} Each point averages over multiple random seeds with standard error bands. (a) Success rate vs.\ training episodes. (b) Steps to reach the goal vs.\ training episodes}{figure.caption.21}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {7}Discussion}{14}{section.7}\protected@file@percent }
+\newlabel{sec:discussion}{{7}{14}{Discussion}{section.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.1}Hierarchy Discovers Spatial Structure}{14}{subsection.7.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.2}Vanishing Gradients in Flat Planning}{14}{subsection.7.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.3}Planning Complexity Reduction}{14}{subsection.7.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.4}Zero-Cost Replanning}{14}{subsection.7.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.5}Limitations and Future Work}{15}{subsection.7.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {8}Conclusion}{15}{section.8}\protected@file@percent }
+\newlabel{sec:conclusion}{{8}{15}{Conclusion}{section.8}{}}
+\gdef \@abspage@last{16}
