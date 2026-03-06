@@ -1,0 +1,32 @@
+{
+  "maze": "large",
+  "start": [
+    -4.5,
+    3.0
+  ],
+  "goal": [
+    4.4488141789686395,
+    -2.8788492600782414
+  ],
+  "goal_cell": [
+    7,
+    10
+  ],
+  "hierarchy": {
+    "steps": 337,
+    "reached_goal": true,
+    "planning_steps": 6,
+    "macro_decisions": 5
+  },
+  "flat": {
+    "steps": 20000,
+    "reached_goal": false,
+    "planning_steps": 20000
+  },
+  "config": {
+    "n_clusters": 12,
+    "train_episodes": 15000,
+    "test_max_steps": 20000,
+    "gamma": 0.95
+  }
+}
