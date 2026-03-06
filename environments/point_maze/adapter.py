@@ -63,7 +63,7 @@ class PointMazeAdapter(BinnedContinuousAdapter):
             renderer = env.unwrapped.point_env.mujoco_renderer
             viewer = renderer._get_viewer(env.render_mode)
             viewer.cam.elevation = -90
-            viewer.cam.azimuth = 0
+            viewer.cam.azimuth = 90
             viewer.cam.distance = 12
             viewer.cam.lookat[:] = [0, 0, 0]
         except Exception:
