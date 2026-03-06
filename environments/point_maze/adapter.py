@@ -450,8 +450,7 @@ class PointMazeAdapter(BinnedContinuousAdapter):
 
     def get_dimension_labels(self) -> Tuple[str, str]:
         """Return axis labels for visualization."""
-        # return ("X Position", "Y Position")
-        return ("", "")
+        return ("Position (x)", "Position (y)")
 
     def obs_to_continuous(self, obs: np.ndarray) -> Tuple[float, float]:
         """Extract (x, y) from stored observation."""

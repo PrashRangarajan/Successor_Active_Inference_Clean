@@ -580,10 +580,10 @@ class TrajectoryVizMixin(object):
 
             if annotate_state:
                 ax_img.text(
-                    0.02, 0.95,
-                    f"{sym0}={pos[idx]:.3f}\n{sym1}={vel[idx]:.3f}",
-                    transform=ax_img.transAxes, fontsize=12, va="top",
-                    bbox=dict(boxstyle="round", alpha=0.6),
+                    0.5, -0.04,
+                    f"{sym0}={pos[idx]:.3f},  {sym1}={vel[idx]:.3f}",
+                    transform=ax_img.transAxes, fontsize=11,
+                    ha="center", va="top",
                 )
 
         # ---- Phase plot (bottom, centered, ~50% figure width) ----
