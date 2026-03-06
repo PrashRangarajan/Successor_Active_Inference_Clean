@@ -513,20 +513,23 @@ class PointMazeAdapter(BinnedContinuousAdapter):
     def plot_clusters_on_maze(self, agent, save_path: str,
                               show_arrows: bool = True,
                               show_goal: bool = True,
-                              goal_xy=None):
+                              goal_xy=None,
+                              start_xy=None):
         """Visualize macro-state clusters overlaid on the physical maze.
 
         Creates a figure with:
         - Dark rectangles for wall cells
         - Colored tiles (one per navigable bin) showing cluster assignment
         - Macro-action arrows between cluster centroids
-        - Goal location marker
+        - Start and goal location markers
 
         Args:
             agent: ``HierarchicalSRAgent`` (for cluster data).
             save_path: Where to save the figure.
             show_arrows: Draw macro-action arrows between clusters.
             show_goal: Mark the goal location.
+            goal_xy: Explicit goal coordinates (overrides adapter cache).
+            start_xy: Start coordinates to show (green circle marker).
         """
         import os
         import matplotlib.pyplot as plt
@@ -559,20 +562,21 @@ class PointMazeAdapter(BinnedContinuousAdapter):
         # Draw walls on top
         self.draw_maze_walls(ax)
 
+        # Compute cluster centroids (used by arrows and markers)
+        centroids = {}
+        for c in range(agent.n_clusters):
+            members = agent.macro_state_list[c]
+            if not members:
+                continue
+            coords = np.array([
+                self.state_space.index_to_state(s) for s in members
+            ])
+            cx = np.mean(x_centers[coords[:, 0]])
+            cy = np.mean(y_centers[coords[:, 1]])
+            centroids[c] = (cx, cy)
+
         # Macro-action arrows
         if show_arrows and hasattr(agent, 'adj_list') and agent.adj_list:
-            centroids = {}
-            for c in range(agent.n_clusters):
-                members = agent.macro_state_list[c]
-                if not members:
-                    continue
-                coords = np.array([
-                    self.state_space.index_to_state(s) for s in members
-                ])
-                cx = np.mean(x_centers[coords[:, 0]])
-                cy = np.mean(y_centers[coords[:, 1]])
-                centroids[c] = (cx, cy)
-
             # Goal macro states
             goal_macros = set()
             for gs in agent.goal_states:
@@ -613,29 +617,51 @@ class PointMazeAdapter(BinnedContinuousAdapter):
                     zorder=13,
                 )
 
+        # Helper: check if a marker position clashes with any centroid
+        def _needs_offset(marker_xy, centroids_dict, threshold=0.4):
+            for _, (cx, cy) in centroids_dict.items():
+                dist = np.sqrt((marker_xy[0] - cx)**2 + (marker_xy[1] - cy)**2)
+                if dist < threshold:
+                    return True
+            return False
+
+        legend_handles = []
+
+        # Start marker
+        if start_xy is not None:
+            sx, sy = float(start_xy[0]), float(start_xy[1])
+            if _needs_offset(start_xy, centroids):
+                sx += 0.45
+            ax.plot(sx, sy, 'o', markersize=16, color='limegreen',
+                    markeredgecolor='darkgreen', markeredgewidth=2, zorder=15)
+            legend_handles.append(
+                plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='limegreen',
+                           markeredgecolor='darkgreen', markersize=10, label='Start'))
+
         # Goal marker — use explicit goal_xy if provided, else fall back to
         # adapter's cached desired_goal (which may have changed on later resets).
         _goal = goal_xy if goal_xy is not None else self._desired_goal
         if show_goal and _goal is not None:
-            ax.plot(
-                _goal[0], _goal[1],
-                marker='*', markersize=18, color='gold',
-                markeredgecolor='black', markeredgewidth=1.5, zorder=15,
-            )
+            gx, gy = float(_goal[0]), float(_goal[1])
+            if _needs_offset(_goal, centroids):
+                gx += 0.45
+            ax.plot(gx, gy, marker='*', markersize=22, color='gold',
+                    markeredgecolor='black', markeredgewidth=1.5, zorder=15)
+            legend_handles.append(
+                plt.Line2D([0], [0], marker='*', color='w', markerfacecolor='gold',
+                           markeredgecolor='black', markersize=12, label='Goal'))
+
+        if legend_handles:
+            ax.legend(handles=legend_handles, loc='upper right', fontsize=11,
+                      framealpha=0.9)
 
         ax.set_xlim(self._x_range)
         ax.set_ylim(self._y_range)
         ax.set_aspect('equal')
-        # ax.set_xlabel("X Position", fontsize=12)
-        # ax.set_ylabel("Y Position", fontsize=12)
+        ax.set_xticks([])
+        ax.set_yticks([])
 
-        # Legend (commented out — centroid labels on the clusters are sufficient)
-        # patches = [mpatches.Patch(color=cluster_colors[i], label=f'Cluster {i}')
-        #            for i in range(agent.n_clusters)]
-        # patches.append(mpatches.Patch(color='#2d2d2d', label='Wall'))
-        # ax.legend(handles=patches, loc='upper right', fontsize=10)
-
-        fig.savefig(save_path, bbox_inches='tight', dpi=150)
+        fig.savefig(save_path, bbox_inches='tight', dpi=150, pad_inches=0.02)
         plt.close(fig)
         print(f"  Saved maze cluster plot to {save_path}")
 
