@@ -82,6 +82,7 @@ class NeuralSRAgent:
         use_her: bool = False,
         her_k: int = 4,
         her_goal_indices: Tuple[int, int] = (4, 6),
+        train_every: int = 1,
     ):
         # Validation
         if not (0 < gamma <= 1):
@@ -152,6 +153,7 @@ class NeuralSRAgent:
         self._use_her = use_her
         self._her_k = her_k
         self._her_goal_indices = her_goal_indices
+        self._train_every = max(1, train_every)
         self.buffer = ReplayBuffer(
             buffer_size, self.obs_dim,
             use_per=use_per, per_alpha=per_alpha,
@@ -341,8 +343,9 @@ class NeuralSRAgent:
                 ep_steps += 1
                 self.total_steps += 1
 
-                # Train on a batch
-                if self.buffer.size >= self.batch_size:
+                # Train on a batch (skip steps to reduce CPU/GPU overhead)
+                if (self.buffer.size >= self.batch_size
+                        and self.total_steps % self._train_every == 0):
                     if self._use_per:
                         beta = self._get_per_beta()
                         batch, per_indices, is_weights = \

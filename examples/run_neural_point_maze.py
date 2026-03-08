@@ -180,6 +180,7 @@ def main():
         use_her=cfg.get("use_her", False),
         her_k=cfg.get("her_k", 4),
         her_goal_indices=her_goal_indices,
+        train_every=cfg.get("train_every", 1),
     )
 
     # Build maze-aware (BFS) reward shaping — the key fix for U-maze.

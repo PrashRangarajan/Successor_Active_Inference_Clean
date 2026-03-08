@@ -345,6 +345,11 @@ class ReplayBuffer:
                 self.add(obs_relabeled, ep_actions[t], reward,
                          next_obs_relabeled, done)
 
+        # Clear episode accumulator so HER transitions don't feed into the
+        # next episode's HER pass (which would cause exponential growth).
+        self._clear_episode_accumulator()
+        self._episode_start_idx = self._ptr
+
     def truncate(self, keep_fraction: float):
         """Keep only the most recent fraction of stored transitions.
 

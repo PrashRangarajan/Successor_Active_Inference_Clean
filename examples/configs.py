@@ -566,6 +566,10 @@ NEURAL_POINTMAZE = {
     "staged_learning": True,
     "consolidation_episodes": 1000,  # Phase 2: SF consolidation
     "consolidation_episodic_replay": 10,  # replay intensity during consolidation
+
+    # Training frequency — update networks every N env steps.
+    # Reduces CPU/GPU overhead ~4x with minimal impact on learning.
+    "train_every": 4,
 }
 
 # =====================================================================
