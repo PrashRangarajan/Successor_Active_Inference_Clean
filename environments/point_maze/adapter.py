@@ -266,20 +266,24 @@ class PointMazeAdapter(BinnedContinuousAdapter):
 
     # ==================== Terminal / Goal ====================
 
-    def is_terminal(self) -> Optional[bool]:
+    def is_terminal(self, obs: Optional[np.ndarray] = None) -> Optional[bool]:
         """Check if the agent is within continuous distance of the goal.
 
         Uses a threshold of 0.45 units, matching PointMaze's native
         ``compute_terminated`` success criterion.
+
+        Args:
+            obs: Optional observation to check. If None, uses current obs.
 
         Returns:
             True/False if a goal has been set, None otherwise.
         """
         if self._agent_goal_xy is None:
             return None
+        check_obs = obs if obs is not None else self._current_obs
         dist = math.sqrt(
-            (self._current_obs[0] - self._agent_goal_xy[0]) ** 2
-            + (self._current_obs[1] - self._agent_goal_xy[1]) ** 2
+            (check_obs[0] - self._agent_goal_xy[0]) ** 2
+            + (check_obs[1] - self._agent_goal_xy[1]) ** 2
         )
         return dist < 0.45
 

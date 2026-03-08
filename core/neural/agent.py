@@ -13,6 +13,7 @@ descent on neural networks instead of direct matrix updates.
 """
 
 import os
+import warnings
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -677,15 +678,23 @@ class NeuralSRAgent:
         """
         for pg in self.sf_optimizer.param_groups:
             pg['lr'] = sf_lr
+            pg['initial_lr'] = sf_lr
         for pg in self.reward_optimizer.param_groups:
             pg['lr'] = rw_lr
+            pg['initial_lr'] = rw_lr
 
         self._sf_scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            self.sf_optimizer, T_max=max(1, decay_steps), eta_min=sf_lr * 0.1
+            self.sf_optimizer, T_max=max(1, decay_steps), eta_min=sf_lr * 0.1,
         )
         self._rw_scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            self.reward_optimizer, T_max=max(1, decay_steps), eta_min=rw_lr * 0.1
+            self.reward_optimizer, T_max=max(1, decay_steps), eta_min=rw_lr * 0.1,
         )
+        # Advance past epoch 0 so the first scheduler.step() in the training
+        # loop doesn't trigger PyTorch's "step() before optimizer.step()" warning.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            self._sf_scheduler.step()
+            self._rw_scheduler.step()
         print(f"  LR reset: SF={sf_lr:.1e}, RW={rw_lr:.1e}, "
               f"cosine decay over {decay_steps} steps")
 
