@@ -41,6 +41,9 @@ from environments.point_maze import PointMazeAdapter
 from core.neural.continuous_adapter import ContinuousAdapter
 from core.neural.agent import NeuralSRAgent
 from examples.configs import NEURAL_POINTMAZE
+from examples.neural_experiment import (
+    setup_device, plot_training_curves, save_training_log,
+)
 
 
 def make_maze_distance_reward(adapter):
@@ -81,18 +84,15 @@ def make_maze_distance_reward(adapter):
             else:
                 _max_dist[0] = 5.0  # fallback
 
-        # Normalize to [-1, 0] range, then add bonuses
+        # Normalize to [-1, 0] range with smooth proximity bonus
         max_d = max(_max_dist[0], 0.01)
         reward = -maze_dist / max_d  # in [-1, 0]
 
-        # Euclidean proximity bonus (fine for close range)
+        # Smooth proximity bonus (exponential, no discontinuous jumps)
         eucl_dist = np.linalg.norm(obs[:2] - obs[4:6])
-        if eucl_dist < 1.0:
-            reward += 1.0
-        if eucl_dist < 0.45:
-            reward += 5.0
+        reward += np.exp(-2.0 * eucl_dist)  # smooth ~1.0 at goal, ~0 far away
 
-        return float(np.clip(reward, -5.0, 5.0))
+        return float(np.clip(reward, -1.0, 1.0))
 
     return maze_distance_reward
 
@@ -102,6 +102,10 @@ def main():
         description="Neural SF agent on PointMaze")
     parser.add_argument("--quick", action="store_true",
                         help="Quick run with fewer episodes")
+    parser.add_argument("--eval-only", action="store_true",
+                        help="Only evaluate from saved checkpoint (no training)")
+    parser.add_argument("--checkpoint", type=str, default=None,
+                        help="Path to checkpoint file (default: <save-dir>/checkpoint.pt)")
     parser.add_argument("--n-eval", type=int, default=10,
                         help="Number of evaluation episodes")
     parser.add_argument("--save-dir", type=str,
@@ -146,12 +150,11 @@ def main():
     print()
 
     # ==================== Create Agent ====================
-    import torch
-    device = args.device
-    if device == 'cuda' and not torch.cuda.is_available():
-        print("CUDA not available, falling back to CPU")
-        device = 'cpu'
+    device = setup_device(args.device)
     print(f"Device: {device}")
+
+    # HER config
+    her_goal_indices = tuple(cfg.get("her_goal_indices", [4, 6]))
 
     agent = NeuralSRAgent(
         adapter=adapter,
@@ -168,6 +171,15 @@ def main():
         epsilon_end=cfg["epsilon_end"],
         epsilon_decay_steps=cfg["epsilon_decay_steps"],
         device=device,
+        use_per=cfg.get("use_per", False),
+        per_alpha=cfg.get("per_alpha", 0.6),
+        per_beta_start=cfg.get("per_beta_start", 0.4),
+        per_beta_end=cfg.get("per_beta_end", 1.0),
+        use_episodic_replay=cfg.get("use_episodic_replay", False),
+        episodic_replay_episodes=cfg.get("episodic_replay_episodes", 2),
+        use_her=cfg.get("use_her", False),
+        her_k=cfg.get("her_k", 4),
+        her_goal_indices=her_goal_indices,
     )
 
     # Build maze-aware (BFS) reward shaping — the key fix for U-maze.
@@ -183,58 +195,112 @@ def main():
         reward_shaping_fn=reward_fn,
     )
 
-    # ==================== Two-Phase Training ====================
-    ep1 = cfg["train_episodes_phase1"]
-    ep2 = cfg["train_episodes_phase2"]
-    frac2 = cfg["diverse_fraction_phase2"]
-    if args.quick:
-        ep1 = 200
-        ep2 = 300
-        args.n_eval = 5
+    # ==================== Train or Load ====================
+    if args.eval_only:
+        ckpt = args.checkpoint or os.path.join(args.save_dir, "checkpoint.pt")
+        if not os.path.exists(ckpt):
+            print(f"Checkpoint not found at {ckpt}")
+            return
+        agent.load(ckpt)
+        print(f"Loaded checkpoint from {ckpt}")
+    else:
+        ep1 = cfg["train_episodes_phase1"]
+        ep2 = cfg["train_episodes_phase2"]
+        frac2 = cfg["diverse_fraction_phase2"]
+        use_staged = cfg.get("staged_learning", False)
+        consolidation_eps = cfg.get("consolidation_episodes", 1000)
+        consolidation_replay = cfg.get("consolidation_episodic_replay", 10)
+        if args.quick:
+            ep1 = 200
+            ep2 = 300
+            consolidation_eps = 100
+            args.n_eval = 5
 
-    t0 = time.time()
+        t0 = time.time()
 
-    # Phase 1: Diverse exploration — build SF representation of maze
-    print(f"Phase 1: Diverse exploration ({ep1} episodes, 100% diverse)")
-    agent.learn_environment(
-        num_episodes=ep1,
-        steps_per_episode=cfg["steps_per_episode"],
-        diverse_start=True,
-        log_interval=max(1, ep1 // 5),
-    )
+        # ---- Phase 1: Diverse exploration — build SF representation ----
+        print(f"Phase 1: Diverse exploration ({ep1} episodes, 100% diverse)")
+        agent.learn_environment(
+            num_episodes=ep1,
+            steps_per_episode=cfg["steps_per_episode"],
+            diverse_start=True,
+            log_interval=max(1, ep1 // 5),
+        )
 
-    os.makedirs(args.save_dir, exist_ok=True)
-    agent.save(os.path.join(args.save_dir, "checkpoint_phase1.pt"))
+        os.makedirs(args.save_dir, exist_ok=True)
+        agent.save(os.path.join(args.save_dir, "checkpoint_phase1.pt"))
 
-    # Phase boundary management
-    agent.truncate_buffer(keep_fraction=cfg["buffer_keep_phase2"])
-    agent.reset_epsilon(
-        new_start=cfg["epsilon_phase2_start"],
-        new_decay_steps=cfg["epsilon_phase2_decay_steps"],
-    )
-    agent.reset_lr(
-        sf_lr=cfg["lr"] * cfg["lr_phase2_fraction"],
-        rw_lr=cfg["lr_w"] * cfg["lr_phase2_fraction"],
-        decay_steps=ep2 * cfg["steps_per_episode"],
-    )
+        # ---- Phase 2: SF consolidation (staged learning) ----
+        # Freeze w so φ/ψ can stabilize without chasing a moving reward signal.
+        # Mirrors tabular agent's 10-epoch replay pass over M.
+        if use_staged and consolidation_eps > 0:
+            print(f"\nPhase 2: SF consolidation ({consolidation_eps} episodes, "
+                  f"w frozen, {consolidation_replay} episodic replays)")
+            agent.freeze_reward_weights()
 
-    # Phase 2: Goal-focused — mostly fixed start
-    print(f"\nPhase 2: Goal-focused ({ep2} episodes, {frac2:.0%} diverse)")
-    agent.learn_environment(
-        num_episodes=ep2,
-        steps_per_episode=cfg["steps_per_episode"],
-        diverse_start=True,
-        diverse_fraction=frac2,
-        log_interval=max(1, ep2 // 5),
-    )
+            # Boost episodic replay for consolidation
+            old_episodic = agent._episodic_replay_episodes
+            agent._episodic_replay_episodes = consolidation_replay
 
-    train_time = time.time() - t0
-    print(f"\nTotal training time: {train_time:.1f}s")
+            agent.learn_environment(
+                num_episodes=consolidation_eps,
+                steps_per_episode=cfg["steps_per_episode"],
+                diverse_start=True,
+                log_interval=max(1, consolidation_eps // 5),
+            )
 
-    # ==================== Save ====================
-    save_path = os.path.join(args.save_dir, "checkpoint.pt")
-    agent.save(save_path)
-    print(f"Saved checkpoint to {save_path}")
+            # Restore settings
+            agent._episodic_replay_episodes = old_episodic
+            agent.unfreeze_reward_weights()
+            agent.save(os.path.join(args.save_dir, "checkpoint_phase2.pt"))
+
+        # ---- Phase boundary: truncate buffer, reset schedule ----
+        agent.truncate_buffer(keep_fraction=cfg["buffer_keep_phase2"])
+        agent.reset_epsilon(
+            new_start=cfg["epsilon_phase2_start"],
+            new_decay_steps=cfg["epsilon_phase2_decay_steps"],
+        )
+        agent.reset_lr(
+            sf_lr=cfg["lr"] * cfg["lr_phase2_fraction"],
+            rw_lr=cfg["lr_w"] * cfg["lr_phase2_fraction"],
+            decay_steps=ep2 * cfg["steps_per_episode"],
+        )
+
+        # ---- Phase 3: Goal-focused — mostly fixed start ----
+        # If staged, freeze φ so only w adapts to the goal.
+        if use_staged:
+            agent.freeze_sf()
+            print(f"\nPhase 3: Goal-focused ({ep2} episodes, {frac2:.0%} diverse, "
+                  f"φ frozen, w learning)")
+        else:
+            print(f"\nPhase 2: Goal-focused ({ep2} episodes, {frac2:.0%} diverse)")
+
+        agent.learn_environment(
+            num_episodes=ep2,
+            steps_per_episode=cfg["steps_per_episode"],
+            diverse_start=True,
+            diverse_fraction=frac2,
+            log_interval=max(1, ep2 // 5),
+        )
+
+        if use_staged:
+            agent.unfreeze_sf()
+
+        train_time = time.time() - t0
+        print(f"\nTotal training time: {train_time:.1f}s")
+
+        # ==================== Save ====================
+        save_path = os.path.join(args.save_dir, "checkpoint.pt")
+        agent.save(save_path)
+        print(f"Saved checkpoint to {save_path}")
+
+        # Save training log data
+        save_training_log(agent.training_log, args.save_dir)
+
+        # Plot training curves
+        fig_dir = args.save_dir.replace("data/", "figures/")
+        print("\n--- Training Curves ---")
+        plot_training_curves(agent.training_log, fig_dir, env_name='PointMaze')
 
     # ==================== Evaluate ====================
     print(f"\nEvaluating ({args.n_eval} episodes)...")
@@ -250,6 +316,7 @@ def main():
         n_y_bins=cfg["n_y_bins"],
     )
     agent.adapter = ContinuousAdapter(test_base)
+    test_base.reset()
     agent.goal_states = test_base.get_goal_states()
 
     results = []

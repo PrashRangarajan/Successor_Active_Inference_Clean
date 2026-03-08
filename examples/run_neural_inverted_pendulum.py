@@ -37,14 +37,14 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import matplotlib.pyplot as plt
 import numpy as np
 
-try:
-    plt.style.use("seaborn-v0_8-poster")
-except OSError:
-    plt.style.use("seaborn-poster")
-
 from environments.mujoco.inverted_pendulum import InvertedPendulumAdapter
 from core.neural.hierarchical_agent import HierarchicalNeuralSRAgent
 from examples.configs import NEURAL_INVERTED_PENDULUM
+from examples.neural_experiment import (
+    setup_device, train_two_phase, train_to_checkpoint,
+    plot_training_curves, save_training_log, load_training_log,
+    plot_checkpoint_curves,
+)
 
 
 # ==================== Reward Shaping ====================
@@ -104,6 +104,12 @@ def create_agent(cfg, render_mode=None):
         n_cluster_samples=3000,
         adjacency_episodes=300,
         adjacency_episode_length=100,
+        use_per=cfg.get("use_per", False),
+        per_alpha=cfg.get("per_alpha", 0.6),
+        per_beta_start=cfg.get("per_beta_start", 0.4),
+        per_beta_end=cfg.get("per_beta_end", 1.0),
+        use_episodic_replay=cfg.get("use_episodic_replay", False),
+        episodic_replay_episodes=cfg.get("episodic_replay_episodes", 2),
     )
 
     # InvertedPendulum env reward (+1/step) is too flat for SF learning.
@@ -123,27 +129,7 @@ def create_agent(cfg, render_mode=None):
 
 def train_agent(agent, cfg, ep_diverse, ep_fixed):
     """Two-phase training: diverse exploration then mixed training."""
-    diverse_frac = cfg.get("diverse_fraction", 0.3)
-
-    # Phase 1: Diverse exploration — SF representation learning
-    print(f"Phase 1: Diverse exploration ({ep_diverse} episodes)")
-    agent.learn_environment(
-        num_episodes=ep_diverse,
-        steps_per_episode=cfg["steps_per_episode"],
-        diverse_start=True,
-        log_interval=max(1, ep_diverse // 5),
-    )
-
-    # Phase 2: Mixed training — refine policy
-    print(f"\nPhase 2: Mixed training ({ep_fixed} episodes, "
-          f"{diverse_frac:.0%} diverse)")
-    agent.learn_environment(
-        num_episodes=ep_fixed,
-        steps_per_episode=cfg["steps_per_episode"],
-        diverse_start=True,
-        diverse_fraction=diverse_frac,
-        log_interval=max(1, ep_fixed // 5),
-    )
+    train_two_phase(agent, cfg, ep_diverse, ep_fixed, phase_boundary=False)
 
 
 # ==================== Evaluation ====================
@@ -338,171 +324,64 @@ def record_episode_video(agent, cfg, save_path, max_steps=1000):
 
 # ==================== Plotting ====================
 
-def plot_training_curves(training_log, save_dir):
-    """Plot training curves from the agent's training log."""
-    os.makedirs(save_dir, exist_ok=True)
-
-    # --- Episode Reward ---
-    fig, ax = plt.subplots(figsize=(12, 6))
-    ep_rewards = training_log['episode_reward']
-    ax.plot(ep_rewards, alpha=0.3, color='C0', linewidth=0.5)
-    window = min(100, len(ep_rewards) // 10 + 1)
-    if window > 1 and len(ep_rewards) >= window:
-        smoothed = np.convolve(ep_rewards, np.ones(window)/window, mode='valid')
-        ax.plot(np.arange(window-1, window-1+len(smoothed)), smoothed,
-                color='C0', linewidth=2, label=f'Smoothed ({window}-ep)')
-    ax.set_xlabel('Episode', fontsize=16)
-    ax.set_ylabel('Episode Reward (survival)', fontsize=16)
-    ax.set_title('Neural SF — InvertedPendulum Training Reward', fontsize=18)
-    ax.legend(fontsize=14)
-    ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, 'training_reward.png'), dpi=150)
-    plt.close()
-    print(f"  Saved {os.path.join(save_dir, 'training_reward.png')}")
-
-    # --- SF Loss ---
-    fig, ax = plt.subplots(figsize=(12, 6))
-    sf_loss = training_log['sf_loss']
-    if sf_loss:
-        ax.plot(sf_loss, alpha=0.2, color='C1', linewidth=0.5)
-        window = min(500, len(sf_loss) // 10 + 1)
-        if window > 1 and len(sf_loss) >= window:
-            smoothed = np.convolve(sf_loss, np.ones(window)/window, mode='valid')
-            ax.plot(np.arange(window-1, window-1+len(smoothed)), smoothed,
-                    color='C1', linewidth=2, label=f'Smoothed ({window}-step)')
-        ax.set_xlabel('Training Step', fontsize=16)
-        ax.set_ylabel('SF TD Loss', fontsize=16)
-        ax.set_title('Successor Feature Loss', fontsize=18)
-        ax.legend(fontsize=14)
-        ax.grid(True, alpha=0.3)
-        ax.set_yscale('log')
-    plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, 'sf_loss.png'), dpi=150)
-    plt.close()
-    print(f"  Saved {os.path.join(save_dir, 'sf_loss.png')}")
-
-    # --- Reward Prediction Loss ---
-    fig, ax = plt.subplots(figsize=(12, 6))
-    rw_loss = training_log['reward_loss']
-    if rw_loss:
-        ax.plot(rw_loss, alpha=0.2, color='C2', linewidth=0.5)
-        window = min(500, len(rw_loss) // 10 + 1)
-        if window > 1 and len(rw_loss) >= window:
-            smoothed = np.convolve(rw_loss, np.ones(window)/window, mode='valid')
-            ax.plot(np.arange(window-1, window-1+len(smoothed)), smoothed,
-                    color='C2', linewidth=2, label=f'Smoothed ({window}-step)')
-        ax.set_xlabel('Training Step', fontsize=16)
-        ax.set_ylabel('Reward Prediction Loss', fontsize=16)
-        ax.set_title('Reward Weight (w) Learning', fontsize=18)
-        ax.legend(fontsize=14)
-        ax.grid(True, alpha=0.3)
-        ax.set_yscale('log')
-    plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, 'reward_loss.png'), dpi=150)
-    plt.close()
-    print(f"  Saved {os.path.join(save_dir, 'reward_loss.png')}")
-
-    # --- Episode Steps ---
-    fig, ax = plt.subplots(figsize=(12, 6))
-    ep_steps = training_log['episode_steps']
-    ax.plot(ep_steps, alpha=0.3, color='C3', linewidth=0.5)
-    window = min(100, len(ep_steps) // 10 + 1)
-    if window > 1 and len(ep_steps) >= window:
-        smoothed = np.convolve(ep_steps, np.ones(window)/window, mode='valid')
-        ax.plot(np.arange(window-1, window-1+len(smoothed)), smoothed,
-                color='C3', linewidth=2, label=f'Smoothed ({window}-ep)')
-    ax.set_xlabel('Episode', fontsize=16)
-    ax.set_ylabel('Steps per Episode (higher = better)', fontsize=16)
-    ax.set_title('Episode Length During Training', fontsize=18)
-    ax.legend(fontsize=14)
-    ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, 'episode_steps.png'), dpi=150)
-    plt.close()
-    print(f"  Saved {os.path.join(save_dir, 'episode_steps.png')}")
-
-
-def plot_checkpoint_curves(episodes_list, survival_rates, avg_steps,
-                           avg_rewards, save_dir):
+def _plot_checkpoint_curves(episodes_list, survival_rates, avg_steps,
+                            avg_rewards, save_dir):
     """Plot evaluation metrics across training checkpoints."""
-    os.makedirs(save_dir, exist_ok=True)
-    n_runs = survival_rates.shape[0]
-
-    def _plot(data, ylabel, title, filename, ylim=None):
-        fig, ax = plt.subplots(figsize=(12, 7))
-        mean = np.mean(data, axis=0)
-        sem = np.std(data, axis=0) / np.sqrt(n_runs)
-        ax.plot(episodes_list, mean, 'o-', color='C0', linewidth=2, markersize=8)
-        ax.fill_between(episodes_list, mean - sem, mean + sem,
-                        alpha=0.3, color='C0')
-        ax.set_xlabel('Training Episodes', fontsize=18)
-        ax.set_ylabel(ylabel, fontsize=18)
-        ax.set_title(title, fontsize=20)
-        ax.tick_params(labelsize=14)
-        ax.grid(True, alpha=0.3)
-        if ylim is not None:
-            ax.set_ylim(ylim)
-        plt.tight_layout()
-        path = os.path.join(save_dir, filename)
-        plt.savefig(path, dpi=150)
-        plt.close()
-        print(f"  Saved {path}")
-
-    _plot(survival_rates, 'Survival Rate',
-          'Neural SF — InvertedPendulum Survival Rate',
-          'checkpoint_survival_rate.png', ylim=(-0.05, 1.05))
-    _plot(avg_steps, 'Avg Steps (higher = better)',
-          'Neural SF — Average Episode Length',
-          'checkpoint_steps.png')
-    _plot(avg_rewards, 'Avg Reward',
-          'Neural SF — Average Episode Reward',
-          'checkpoint_reward.png')
+    plot_checkpoint_curves(
+        episodes_list,
+        {'Survival Rate': survival_rates,
+         'Avg Steps': avg_steps,
+         'Avg Reward': avg_rewards},
+        save_dir, env_name='InvertedPendulum')
 
 
 # ==================== Multi-Checkpoint Experiment ====================
 
 def checkpoint_experiment(cfg, episodes_list, n_runs, n_eval):
-    """Train across multiple training budgets and evaluate each.
+    """Train incrementally, evaluating at each checkpoint.
+
+    Instead of retraining from scratch at each episode budget, trains
+    one agent through the full schedule and evaluates at intermediate
+    points.  This reduces total training from O(sum(episodes_list))
+    to O(max(episodes_list)) per run.
 
     Returns:
-        (survival_rates, avg_steps, avg_rewards, episodes_list)
+        (survival_rates, avg_steps, avg_rewards)
     """
-    n_trials = len(episodes_list)
+    sorted_eps = sorted(episodes_list)
+    max_eps = sorted_eps[-1]
+    ep_diverse = int(max_eps * 0.4)
+    ep_fixed = max_eps - ep_diverse
 
-    survival_rates = np.zeros((n_runs, n_trials))
-    avg_steps_arr = np.zeros((n_runs, n_trials))
-    avg_rewards_arr = np.zeros((n_runs, n_trials))
+    survival_rates = np.zeros((n_runs, len(episodes_list)))
+    avg_steps_arr = np.zeros((n_runs, len(episodes_list)))
+    avg_rewards_arr = np.zeros((n_runs, len(episodes_list)))
 
     for run in range(n_runs):
         print(f"\n{'='*60}")
         print(f"Run {run+1}/{n_runs}")
         print(f"{'='*60}")
 
-        for trial, total_eps in enumerate(episodes_list):
-            ep_diverse = int(total_eps * 0.4)
-            ep_fixed = total_eps - ep_diverse
+        agent, adapter = create_agent(cfg)
+        trained, boundary_done = 0, False
 
-            print(f"\n--- Checkpoint: {total_eps} episodes "
-                  f"(diverse={ep_diverse}, fixed={ep_fixed}) ---")
-
-            agent, adapter = create_agent(cfg)
-            train_agent(agent, cfg, ep_diverse, ep_fixed)
+        for target in sorted_eps:
+            print(f"\n--- Checkpoint: {target} episodes ---")
+            trained, boundary_done = train_to_checkpoint(
+                agent, cfg, target, trained,
+                ep_diverse, ep_fixed, boundary_done)
 
             results = evaluate_agent(agent, cfg, n_eval)
+            idx = episodes_list.index(target)
 
-            # For InvertedPendulum: survival = steps >= 950
             survived = [r for r in results if r['steps'] >= 950]
-            survival_rate = len(survived) / len(results)
-            avg_steps = np.mean([r['steps'] for r in results])
-            avg_reward = np.mean([r['reward'] for r in results])
+            survival_rates[run, idx] = len(survived) / len(results)
+            avg_steps_arr[run, idx] = np.mean([r['steps'] for r in results])
+            avg_rewards_arr[run, idx] = np.mean([r['reward'] for r in results])
 
-            survival_rates[run, trial] = survival_rate
-            avg_steps_arr[run, trial] = avg_steps
-            avg_rewards_arr[run, trial] = avg_reward
-
-            print(f"  => Survival: {survival_rate:.0%}, "
-                  f"Avg steps: {avg_steps:.1f}, Avg reward: {avg_reward:.1f}")
+            print(f"  => Survival: {survival_rates[run, idx]:.0%}, "
+                  f"Avg steps: {avg_steps_arr[run, idx]:.1f}, "
+                  f"Avg reward: {avg_rewards_arr[run, idx]:.1f}")
 
     return survival_rates, avg_steps_arr, avg_rewards_arr
 
@@ -618,13 +497,11 @@ def main():
         print(f"Saved checkpoint to {save_path}")
 
         # Save training log
-        for key, vals in agent.training_log.items():
-            np.save(os.path.join(data_dir, f"training_{key}.npy"),
-                    np.array(vals))
+        save_training_log(agent.training_log, data_dir)
 
         # Plot training curves
         print("\n--- Training Curves ---")
-        plot_training_curves(agent.training_log, fig_dir)
+        plot_training_curves(agent.training_log, fig_dir, env_name='InvertedPendulum')
 
         # Evaluate the fully trained agent
         print("\n--- Default Start Evaluation ---")
@@ -667,7 +544,7 @@ def main():
 
         # Plot checkpoint curves
         print("\n--- Checkpoint Curves ---")
-        plot_checkpoint_curves(
+        _plot_checkpoint_curves(
             episodes, survival_rates, avg_steps_arr, avg_rewards_arr, fig_dir)
 
     else:
@@ -678,19 +555,10 @@ def main():
         os.makedirs(fig_dir, exist_ok=True)
 
     # --- Always try to plot from saved data ---
-    training_keys = ['sf_loss', 'reward_loss', 'episode_reward', 'episode_steps']
-    training_log = {}
-    all_found = True
-    for key in training_keys:
-        path = os.path.join(data_dir, f"training_{key}.npy")
-        if os.path.exists(path):
-            training_log[key] = np.load(path).tolist()
-        else:
-            all_found = False
-
-    if all_found and training_log:
+    training_log = load_training_log(data_dir)
+    if training_log:
         print("\n--- Training Curves (from saved data) ---")
-        plot_training_curves(training_log, fig_dir)
+        plot_training_curves(training_log, fig_dir, env_name='InvertedPendulum')
 
     ckpt_survival_path = os.path.join(data_dir, "checkpoint_survival.npy")
     if os.path.exists(ckpt_survival_path):
@@ -700,7 +568,7 @@ def main():
         avg_rewards_arr = np.load(os.path.join(data_dir, "checkpoint_rewards.npy"))
         eps_list = np.load(
             os.path.join(data_dir, "checkpoint_episodes.npy")).tolist()
-        plot_checkpoint_curves(
+        _plot_checkpoint_curves(
             eps_list, survival_rates, avg_steps_arr, avg_rewards_arr, fig_dir)
 
     print(f"\nDone! Figures saved to {fig_dir}/")

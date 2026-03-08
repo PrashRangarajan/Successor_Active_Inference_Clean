@@ -366,6 +366,14 @@ NEURAL_ACROBOT = {
     "eval_episodes": [500, 1000, 2000, 3000, 5000],
     "eval_quick_episodes": [500, 1000, 2000],
     "eval_quick_n_runs": 5,
+
+    # Replay buffer — PER + episodic replay (opt-in)
+    "use_per": False,
+    "per_alpha": 0.6,
+    "per_beta_start": 0.4,
+    "per_beta_end": 1.0,
+    "use_episodic_replay": False,
+    "episodic_replay_episodes": 2,
 }
 
 # =====================================================================
@@ -411,6 +419,14 @@ NEURAL_INVERTED_PENDULUM = {
     "eval_episodes": [500, 1000, 2000, 3000, 5000],
     "eval_quick_episodes": [500, 1000, 2000],
     "eval_quick_n_runs": 2,
+
+    # Replay buffer — PER + episodic replay (opt-in)
+    "use_per": False,
+    "per_alpha": 0.6,
+    "per_beta_start": 0.4,
+    "per_beta_end": 1.0,
+    "use_episodic_replay": False,
+    "episodic_replay_episodes": 2,
 }
 
 # =====================================================================
@@ -460,6 +476,14 @@ NEURAL_HALF_CHEETAH = {
     "eval_episodes": [500, 1000, 2000, 3000, 5000],
     "eval_quick_episodes": [500, 1000, 2000],
     "eval_quick_n_runs": 3,
+
+    # Replay buffer — PER + episodic replay (opt-in)
+    "use_per": False,
+    "per_alpha": 0.6,
+    "per_beta_start": 0.4,
+    "per_beta_end": 1.0,
+    "use_episodic_replay": False,
+    "episodic_replay_episodes": 2,
 }
 
 # =====================================================================
@@ -471,18 +495,18 @@ NEURAL_POINTMAZE = {
     "n_x_bins": 20,
     "n_y_bins": 20,
 
-    # Neural architecture (same scale as Acrobot — 6D obs, 8 actions)
-    "sf_dim": 64,
-    "hidden_sizes": (128, 128),
+    # Neural architecture
+    "sf_dim": 128,
+    "hidden_sizes": (256, 256),
 
     # Training
     "gamma": 0.99,
-    "lr": 1e-4,             # reduced from 3e-4 — SF loss was diverging
-    "lr_w": 1e-4,           # reduced from 3e-4 — match SF LR
+    "lr": 3e-4,
+    "lr_w": 3e-4,
     "batch_size": 256,
-    "buffer_size": 300_000,
+    "buffer_size": 500_000,
     "target_update_freq": 1000,
-    "tau": 0.002,           # reduced from 0.005 — softer target updates
+    "tau": 0.005,
     "steps_per_episode": 300,
 
     # Two-phase training schedule
@@ -520,6 +544,28 @@ NEURAL_POINTMAZE = {
     "eval_episodes": [500, 1000, 2000, 3000, 5000],
     "eval_quick_episodes": [500, 1000, 2000],
     "eval_quick_n_runs": 3,
+
+    # Replay buffer — PER + episodic replay
+    "use_per": True,
+    "per_alpha": 0.6,
+    "per_beta_start": 0.4,
+    "per_beta_end": 1.0,
+    "use_episodic_replay": True,
+    "episodic_replay_episodes": 5,
+
+    # Hindsight Experience Replay (HER)
+    # Relabels failed trajectories with achieved goals, turning every
+    # episode into useful training data for goal-conditioned learning.
+    "use_her": True,
+    "her_k": 4,                    # future goals per transition
+    "her_goal_indices": [4, 6],    # obs[4:6] = [goal_x, goal_y]
+
+    # Staged learning — Phase 2 consolidation before goal-focused Phase 3
+    # In Phase 2, freeze w to consolidate φ/ψ with extra replay,
+    # then in Phase 3, freeze φ and only train w for goal adaptation.
+    "staged_learning": True,
+    "consolidation_episodes": 1000,  # Phase 2: SF consolidation
+    "consolidation_episodic_replay": 10,  # replay intensity during consolidation
 }
 
 # =====================================================================
@@ -570,6 +616,14 @@ NEURAL_ANTMAZE = {
     "eval_episodes": [500, 1000, 2000, 3000, 5000],
     "eval_quick_episodes": [500, 1000, 2000],
     "eval_quick_n_runs": 3,
+
+    # Replay buffer — PER + episodic replay (opt-in)
+    "use_per": False,
+    "per_alpha": 0.6,
+    "per_beta_start": 0.4,
+    "per_beta_end": 1.0,
+    "use_episodic_replay": False,
+    "episodic_replay_episodes": 2,
 }
 
 # =====================================================================

@@ -1,0 +1,59 @@
+============================================================
+Neural Successor Feature Agent — Acrobot
+============================================================
+Observation dim: 6
+Actions: 3
+SF dim: 64
+Goal states (discrete): 105 bins
+
+Device: cuda
+Phase 1: Diverse exploration (1500 episodes, 100% diverse)
+Learning with Neural SF (1500 episodes, sf_dim=64, ε: 1.000→0.05)...
+  Episode 300/1500 | Avg reward: 94.97 | SF loss: 0.3772 | ε: 0.954 | Buffer: 5763
+  Episode 600/1500 | Avg reward: 88.98 | SF loss: 0.2188 | ε: 0.887 | Buffer: 14216
+  Episode 900/1500 | Avg reward: 89.92 | SF loss: 0.1843 | ε: 0.826 | Buffer: 22035
+  Episode 1200/1500 | Avg reward: 87.16 | SF loss: 0.1504 | ε: 0.757 | Buffer: 30663
+  Episode 1500/1500 | Avg reward: 94.34 | SF loss: 0.1460 | ε: 0.712 | Buffer: 36336
+Learning complete. Total steps: 36336
+  Buffer truncated: 36336 -> 10900 (kept 30%)
+  LR reset: SF=1.5e-04, RW=1.5e-04, cosine decay over 750000 steps
+
+Phase 2: Transition (1500 episodes, 60% diverse)
+Learning with Neural SF (1500 episodes, sf_dim=64, ε: 0.300→0.05)...
+  Episode 300/1500 | Avg reward: -144.43 | SF loss: 0.0226 | ε: 0.091 | Buffer: 77723
+  Episode 600/1500 | Avg reward: -116.10 | SF loss: 0.0196 | ε: 0.050 | Buffer: 137184
+  Episode 900/1500 | Avg reward: -127.90 | SF loss: 0.0175 | ε: 0.050 | Buffer: 200557
+  Episode 1200/1500 | Avg reward: -132.55 | SF loss: 0.0178 | ε: 0.050 | Buffer: 264722
+  Episode 1500/1500 | Avg reward: -119.54 | SF loss: 0.0143 | ε: 0.050 | Buffer: 300000
+Learning complete. Total steps: 348985
+  Buffer truncated: 300000 -> 150000 (kept 50%)
+  LR reset: SF=7.5e-05, RW=7.5e-05, cosine decay over 1000000 steps
+
+Phase 3: Task-focused (2000 episodes, 30% diverse)
+Learning with Neural SF (2000 episodes, sf_dim=64, ε: 0.150→0.05)...
+  Episode 400/2000 | Avg reward: -216.85 | SF loss: 0.0138 | ε: 0.050 | Buffer: 285098
+  Episode 800/2000 | Avg reward: -188.27 | SF loss: 0.0132 | ε: 0.050 | Buffer: 300000
+  Episode 1200/2000 | Avg reward: -244.06 | SF loss: 0.0185 | ε: 0.050 | Buffer: 300000
+  Episode 1600/2000 | Avg reward: -313.06 | SF loss: 0.0153 | ε: 0.050 | Buffer: 300000
+  Episode 2000/2000 | Avg reward: -306.92 | SF loss: 0.0136 | ε: 0.050 | Buffer: 300000
+Learning complete. Total steps: 1036681
+
+Total training time: 2944.5s
+Saved checkpoint to data/neural_acrobot/checkpoint.pt
+
+Evaluating (10 episodes)...
+  Episode 1:  500 steps, reward=-500.0, timeout
+  Episode 2:  500 steps, reward=-500.0, timeout
+  Episode 3:  500 steps, reward=-500.0, timeout
+  Episode 4:  500 steps, reward=-500.0, timeout
+  Episode 5:  500 steps, reward=-500.0, timeout
+  Episode 6:  500 steps, reward=-500.0, timeout
+  Episode 7:  500 steps, reward=-500.0, timeout
+  Episode 8:  500 steps, reward=-500.0, timeout
+  Episode 9:  500 steps, reward=-500.0, timeout
+  Episode 10:  500 steps, reward=-500.0, timeout
+
+========================================
+Success rate: 0/10 (0%)
+Avg steps (all): 500.0 ± 0.0
+========================================

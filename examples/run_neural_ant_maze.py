@@ -33,11 +33,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import matplotlib.pyplot as plt
 import numpy as np
 
-try:
-    plt.style.use("seaborn-v0_8-poster")
-except OSError:
-    plt.style.use("seaborn-poster")
-
 import gymnasium as gym
 import gymnasium_robotics
 
@@ -46,6 +41,11 @@ gym.register_envs(gymnasium_robotics)
 from environments.mujoco.ant_maze import AntMazeAdapter
 from core.neural.hierarchical_agent import HierarchicalNeuralSRAgent
 from examples.configs import NEURAL_ANTMAZE
+from examples.neural_experiment import (
+    setup_device, train_two_phase, train_to_checkpoint,
+    plot_training_curves, save_training_log, load_training_log,
+    plot_checkpoint_curves,
+)
 
 
 # ==================== Reward Shaping ====================
@@ -123,6 +123,12 @@ def create_agent(cfg, render_mode=None, device='cpu'):
         adjacency_episodes=500,
         adjacency_episode_length=100,
         device=device,
+        use_per=cfg.get("use_per", False),
+        per_alpha=cfg.get("per_alpha", 0.6),
+        per_beta_start=cfg.get("per_beta_start", 0.4),
+        per_beta_end=cfg.get("per_beta_end", 1.0),
+        use_episodic_replay=cfg.get("use_episodic_replay", False),
+        episodic_replay_episodes=cfg.get("episodic_replay_episodes", 2),
     )
 
     # Use distance-based shaping for richer gradient signal
@@ -139,44 +145,8 @@ def create_agent(cfg, render_mode=None, device='cpu'):
 
 
 def train_agent(agent, cfg, ep_diverse, ep_fixed):
-    """Two-phase training: diverse exploration then mixed training.
-
-    Phase boundary management:
-    - Buffer truncation to remove stale diverse-exploration data
-    - Epsilon reset to re-explore under the new start distribution
-    - LR warm restart with cosine annealing
-    """
-    diverse_frac = cfg.get("diverse_fraction", 0.3)
-
-    print(f"Phase 1: Diverse exploration ({ep_diverse} episodes)")
-    agent.learn_environment(
-        num_episodes=ep_diverse,
-        steps_per_episode=cfg["steps_per_episode"],
-        diverse_start=True,
-        log_interval=max(1, ep_diverse // 5),
-    )
-
-    # Phase boundary management
-    agent.truncate_buffer(keep_fraction=cfg.get("buffer_keep_phase2", 0.3))
-    agent.reset_epsilon(
-        new_start=cfg.get("epsilon_phase2_start", 0.3),
-        new_decay_steps=cfg.get("epsilon_phase2_decay_steps", 100_000),
-    )
-    agent.reset_lr(
-        sf_lr=cfg["lr"] * cfg.get("lr_phase2_fraction", 0.5),
-        rw_lr=cfg["lr_w"] * cfg.get("lr_phase2_fraction", 0.5),
-        decay_steps=ep_fixed * cfg["steps_per_episode"],
-    )
-
-    print(f"\nPhase 2: Mixed training ({ep_fixed} episodes, "
-          f"{diverse_frac:.0%} diverse)")
-    agent.learn_environment(
-        num_episodes=ep_fixed,
-        steps_per_episode=cfg["steps_per_episode"],
-        diverse_start=True,
-        diverse_fraction=diverse_frac,
-        log_interval=max(1, ep_fixed // 5),
-    )
+    """Two-phase training: diverse exploration then mixed training."""
+    train_two_phase(agent, cfg, ep_diverse, ep_fixed)
 
 
 # ==================== Evaluation ====================
@@ -235,111 +205,54 @@ def print_eval_results(results, label=""):
 
 # ==================== Plotting ====================
 
-def plot_training_curves(training_log, save_dir):
-    """Plot training curves."""
-    os.makedirs(save_dir, exist_ok=True)
-
-    for key, ylabel, title, color, use_log in [
-        ('episode_reward', 'Episode Reward',
-         'Neural SF — AntMaze Training Reward', 'C0', False),
-        ('sf_loss', 'SF TD Loss', 'Successor Feature Loss', 'C1', True),
-        ('reward_loss', 'Reward Prediction Loss',
-         'Reward Weight (w) Learning', 'C2', True),
-        ('episode_steps', 'Steps per Episode',
-         'Episode Length During Training', 'C3', False),
-    ]:
-        fig, ax = plt.subplots(figsize=(12, 6))
-        data = training_log.get(key, [])
-        if not data:
-            plt.close()
-            continue
-        ax.plot(data, alpha=0.2 if len(data) > 500 else 0.5,
-                color=color, linewidth=0.5)
-        window = min(100 if 'episode' in key else 500,
-                     len(data) // 10 + 1)
-        if window > 1 and len(data) >= window:
-            smoothed = np.convolve(data, np.ones(window)/window, mode='valid')
-            ax.plot(np.arange(window-1, window-1+len(smoothed)), smoothed,
-                    color=color, linewidth=2, label=f'Smoothed ({window})')
-        ax.set_xlabel('Episode' if 'episode' in key else 'Training Step',
-                      fontsize=16)
-        ax.set_ylabel(ylabel, fontsize=16)
-        ax.set_title(title, fontsize=18)
-        ax.legend(fontsize=14)
-        ax.grid(True, alpha=0.3)
-        if use_log:
-            ax.set_yscale('log')
-        plt.tight_layout()
-        fname = (f"{key.replace('episode_', 'training_') if 'episode' in key else key}.png")
-        path = os.path.join(save_dir, fname)
-        plt.savefig(path, dpi=150)
-        plt.close()
-        print(f"  Saved {path}")
-
-
-def plot_checkpoint_curves(episodes_list, avg_rewards, avg_steps, save_dir):
+def _plot_checkpoint_curves(episodes_list, avg_rewards, avg_steps, save_dir):
     """Plot evaluation metrics across training checkpoints."""
-    os.makedirs(save_dir, exist_ok=True)
-    n_runs = avg_rewards.shape[0]
-
-    def _plot(data, ylabel, title, filename):
-        fig, ax = plt.subplots(figsize=(12, 7))
-        mean = np.mean(data, axis=0)
-        sem = np.std(data, axis=0) / np.sqrt(n_runs)
-        ax.plot(episodes_list, mean, 'o-', color='C0',
-                linewidth=2, markersize=8)
-        ax.fill_between(episodes_list, mean - sem, mean + sem,
-                        alpha=0.3, color='C0')
-        ax.set_xlabel('Training Episodes', fontsize=18)
-        ax.set_ylabel(ylabel, fontsize=18)
-        ax.set_title(title, fontsize=20)
-        ax.tick_params(labelsize=14)
-        ax.grid(True, alpha=0.3)
-        plt.tight_layout()
-        path = os.path.join(save_dir, filename)
-        plt.savefig(path, dpi=150)
-        plt.close()
-        print(f"  Saved {path}")
-
-    _plot(avg_rewards, 'Avg Episode Reward',
-          'Neural SF — AntMaze Reward', 'checkpoint_reward.png')
-    _plot(avg_steps, 'Avg Episode Steps',
-          'Neural SF — AntMaze Episode Length', 'checkpoint_steps.png')
+    plot_checkpoint_curves(
+        episodes_list,
+        {'Avg Episode Reward': avg_rewards,
+         'Avg Episode Steps': avg_steps},
+        save_dir, env_name='AntMaze')
 
 
 # ==================== Multi-Checkpoint Experiment ====================
 
 def checkpoint_experiment(cfg, episodes_list, n_runs, n_eval, device='cpu'):
-    """Train across multiple training budgets and evaluate each."""
-    n_trials = len(episodes_list)
+    """Train incrementally, evaluating at each checkpoint.
 
-    avg_rewards_arr = np.zeros((n_runs, n_trials))
-    avg_steps_arr = np.zeros((n_runs, n_trials))
+    Instead of retraining from scratch at each episode budget, trains
+    one agent through the full schedule and evaluates at intermediate
+    points.  This reduces total training from O(sum(episodes_list))
+    to O(max(episodes_list)) per run.
+    """
+    sorted_eps = sorted(episodes_list)
+    max_eps = sorted_eps[-1]
+    ep_diverse = int(max_eps * 0.4)
+    ep_fixed = max_eps - ep_diverse
+
+    avg_rewards_arr = np.zeros((n_runs, len(episodes_list)))
+    avg_steps_arr = np.zeros((n_runs, len(episodes_list)))
 
     for run in range(n_runs):
         print(f"\n{'='*60}")
         print(f"Run {run+1}/{n_runs}")
         print(f"{'='*60}")
 
-        for trial, total_eps in enumerate(episodes_list):
-            ep_diverse = int(total_eps * 0.4)
-            ep_fixed = total_eps - ep_diverse
+        agent, adapter = create_agent(cfg, device=device)
+        trained, boundary_done = 0, False
 
-            print(f"\n--- Checkpoint: {total_eps} episodes "
-                  f"(diverse={ep_diverse}, fixed={ep_fixed}) ---")
-
-            agent, adapter = create_agent(cfg, device=device)
-            train_agent(agent, cfg, ep_diverse, ep_fixed)
+        for target in sorted_eps:
+            print(f"\n--- Checkpoint: {target} episodes ---")
+            trained, boundary_done = train_to_checkpoint(
+                agent, cfg, target, trained,
+                ep_diverse, ep_fixed, boundary_done)
 
             results = evaluate_agent(agent, cfg, n_eval)
-            avg_reward = np.mean([r['reward'] for r in results])
-            avg_steps = np.mean([r['steps'] for r in results])
+            idx = episodes_list.index(target)
+            avg_rewards_arr[run, idx] = np.mean([r['reward'] for r in results])
+            avg_steps_arr[run, idx] = np.mean([r['steps'] for r in results])
 
-            avg_rewards_arr[run, trial] = avg_reward
-            avg_steps_arr[run, trial] = avg_steps
-
-            print(f"  => Avg reward: {avg_reward:.1f}, "
-                  f"Avg steps: {avg_steps:.1f}")
+            print(f"  => Avg reward: {avg_rewards_arr[run, idx]:.1f}, "
+                  f"Avg steps: {avg_steps_arr[run, idx]:.1f}")
 
     return avg_rewards_arr, avg_steps_arr
 
@@ -361,11 +274,7 @@ def main():
                         help="Torch device ('cpu' or 'cuda')")
     args_cli = parser.parse_args()
 
-    import torch
-    device = args_cli.device
-    if device == 'cuda' and not torch.cuda.is_available():
-        print("CUDA not available, falling back to CPU")
-        device = 'cpu'
+    device = setup_device(args_cli.device)
 
     cfg = NEURAL_ANTMAZE
 
@@ -429,12 +338,10 @@ def main():
         agent.save(os.path.join(checkpoint_dir, "checkpoint.pt"))
         print(f"Saved checkpoint")
 
-        for key, vals in agent.training_log.items():
-            np.save(os.path.join(data_dir, f"training_{key}.npy"),
-                    np.array(vals))
+        save_training_log(agent.training_log, data_dir)
 
         print("\n--- Training Curves ---")
-        plot_training_curves(agent.training_log, fig_dir)
+        plot_training_curves(agent.training_log, fig_dir, env_name='AntMaze')
 
         print("\n--- Default Start Evaluation ---")
         results_default = evaluate_agent(agent, cfg, n_eval, diverse=False)
@@ -464,7 +371,7 @@ def main():
                     np.array(episodes))
 
             print("\n--- Checkpoint Curves ---")
-            plot_checkpoint_curves(episodes, avg_rewards, avg_steps, fig_dir)
+            _plot_checkpoint_curves(episodes, avg_rewards, avg_steps, fig_dir)
 
     else:
         print("=" * 60)
@@ -473,20 +380,10 @@ def main():
         os.makedirs(fig_dir, exist_ok=True)
 
     # --- Always try to plot from saved data ---
-    training_keys = ['sf_loss', 'reward_loss', 'episode_reward',
-                     'episode_steps']
-    training_log = {}
-    all_found = True
-    for key in training_keys:
-        path = os.path.join(data_dir, f"training_{key}.npy")
-        if os.path.exists(path):
-            training_log[key] = np.load(path).tolist()
-        else:
-            all_found = False
-
-    if all_found and training_log:
+    training_log = load_training_log(data_dir)
+    if training_log:
         print("\n--- Training Curves (from saved data) ---")
-        plot_training_curves(training_log, fig_dir)
+        plot_training_curves(training_log, fig_dir, env_name='AntMaze')
 
     ckpt_rewards_path = os.path.join(data_dir, "checkpoint_rewards.npy")
     if os.path.exists(ckpt_rewards_path):
@@ -495,7 +392,7 @@ def main():
         avg_steps = np.load(os.path.join(data_dir, "checkpoint_steps.npy"))
         eps_list = np.load(
             os.path.join(data_dir, "checkpoint_episodes.npy")).tolist()
-        plot_checkpoint_curves(eps_list, avg_rewards, avg_steps, fig_dir)
+        _plot_checkpoint_curves(eps_list, avg_rewards, avg_steps, fig_dir)
 
     print(f"\nDone! Figures saved to {fig_dir}/")
 

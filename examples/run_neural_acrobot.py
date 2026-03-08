@@ -32,6 +32,7 @@ from environments.acrobot import AcrobotAdapter
 from core.neural.continuous_adapter import ContinuousAdapter
 from core.neural.agent import NeuralSRAgent
 from examples.configs import NEURAL_ACROBOT
+from examples.neural_experiment import setup_device
 
 
 def acrobot_height_reward(obs):
@@ -101,11 +102,7 @@ def main():
     print()
 
     # ==================== Create Agent ====================
-    import torch
-    device = args.device
-    if device == 'cuda' and not torch.cuda.is_available():
-        print("CUDA not available, falling back to CPU")
-        device = 'cpu'
+    device = setup_device(args.device)
     print(f"Device: {device}")
 
     agent = NeuralSRAgent(
@@ -123,6 +120,12 @@ def main():
         epsilon_end=cfg["epsilon_end"],
         epsilon_decay_steps=cfg["epsilon_decay_steps"],
         device=device,
+        use_per=cfg.get("use_per", False),
+        per_alpha=cfg.get("per_alpha", 0.6),
+        per_beta_start=cfg.get("per_beta_start", 0.4),
+        per_beta_end=cfg.get("per_beta_end", 1.0),
+        use_episodic_replay=cfg.get("use_episodic_replay", False),
+        episodic_replay_episodes=cfg.get("episodic_replay_episodes", 2),
     )
 
     agent.set_goal(

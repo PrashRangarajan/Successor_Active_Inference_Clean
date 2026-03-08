@@ -1,0 +1,24 @@
+============================================================
+Neural Successor Feature Agent -- PointMaze
+============================================================
+Observation dim: 6 (6D: x, y, vx, vy, gx, gy)
+Actions: 8 (8 directional forces)
+SF dim: 128
+Maze: PointMaze_UMaze-v3
+Bins: 20x20 (112 navigable)
+Goal: (-1.18, -0.80)
+
+Device: cuda
+Phase 1: Diverse exploration (2000 episodes, 100% diverse)
+Learning with Neural SF (2000 episodes, sf_dim=128, ε: 1.000→0.05)...
+  Episode 400/2000 | Avg reward: -131.82 | SF loss: 0.0014 | ε: 0.708 | Buffer: 120000
+  Episode 800/2000 | Avg reward: -101.20 | SF loss: 0.0016 | ε: 0.415 | Buffer: 240000
+  Episode 1200/2000 | Avg reward: -107.43 | SF loss: 0.0092 | ε: 0.123 | Buffer: 360000
+  Episode 1600/2000 | Avg reward: -149.21 | SF loss: 0.0355 | ε: 0.050 | Buffer: 480000
+  Episode 2000/2000 | Avg reward: -162.55 | SF loss: 0.0884 | ε: 0.050 | Buffer: 500000
+Learning complete. Total steps: 600000
+  Buffer truncated: 500000 -> 150000 (kept 30%)
+  LR reset: SF=1.5e-04, RW=1.5e-04, cosine decay over 900000 steps
+
+Phase 2: Goal-focused (3000 episodes, 30% diverse)
+Learning with Neural SF (3000 episodes, sf_dim=128, ε: 0.300→0.05)...

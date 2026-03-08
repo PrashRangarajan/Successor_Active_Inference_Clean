@@ -22,7 +22,7 @@ import torch.optim as optim
 
 from .networks import SFNetwork, ActionConditionedSFNetwork, RewardFeatureNetwork
 from .replay_buffer import ReplayBuffer
-from .losses import sf_td_loss, reward_prediction_loss
+from .losses import sf_td_loss, sf_td_loss_per_sample, reward_prediction_loss
 from .utils import soft_update, hard_update
 from .continuous_adapter import ContinuousAdapter
 
@@ -71,6 +71,16 @@ class NeuralSRAgent:
         grad_clip: float = 1.0,
         device: str = 'cpu',
         sf_network_cls: str = 'per_action',
+        use_per: bool = False,
+        per_alpha: float = 0.6,
+        per_beta_start: float = 0.4,
+        per_beta_end: float = 1.0,
+        per_beta_annealing_steps: Optional[int] = None,
+        use_episodic_replay: bool = False,
+        episodic_replay_episodes: int = 2,
+        use_her: bool = False,
+        her_k: int = 4,
+        her_goal_indices: Tuple[int, int] = (4, 6),
     ):
         # Validation
         if not (0 < gamma <= 1):
@@ -132,7 +142,19 @@ class NeuralSRAgent:
         self._rw_scheduler = None
 
         # Replay buffer
-        self.buffer = ReplayBuffer(buffer_size, self.obs_dim)
+        self._use_per = use_per
+        self._per_beta_start = per_beta_start
+        self._per_beta_end = per_beta_end
+        self._per_beta_annealing_steps = per_beta_annealing_steps or 1_000_000
+        self._use_episodic_replay = use_episodic_replay
+        self._episodic_replay_episodes = episodic_replay_episodes
+        self._use_her = use_her
+        self._her_k = her_k
+        self._her_goal_indices = her_goal_indices
+        self.buffer = ReplayBuffer(
+            buffer_size, self.obs_dim,
+            use_per=use_per, per_alpha=per_alpha,
+        )
 
         # State
         self.total_steps = 0
@@ -220,6 +242,40 @@ class NeuralSRAgent:
         if not use_env_reward:
             self._reward_fn = self._goal_reward_fn
 
+    # ==================== Staged Learning ====================
+
+    def freeze_sf(self):
+        """Freeze successor feature network (stop gradient updates).
+
+        Use during staged learning Phase 3: only w adapts to the goal.
+        """
+        for param in self.sf_net.parameters():
+            param.requires_grad = False
+        for param in self.sf_target.parameters():
+            param.requires_grad = False
+
+    def unfreeze_sf(self):
+        """Unfreeze successor feature network."""
+        for param in self.sf_net.parameters():
+            param.requires_grad = True
+        # Target network doesn't need grad (updated via soft copy)
+
+    def freeze_reward_weights(self):
+        """Freeze reward weight w and reward feature network.
+
+        Use during staged learning Phase 2: consolidate SF representation
+        without the moving target of a changing reward signal.
+        """
+        self.w.requires_grad = False
+        for param in self.reward_net.parameters():
+            param.requires_grad = False
+
+    def unfreeze_reward_weights(self):
+        """Unfreeze reward weight w and reward feature network."""
+        self.w.requires_grad = True
+        for param in self.reward_net.parameters():
+            param.requires_grad = True
+
     # ==================== Learning ====================
 
     def learn_environment(self, num_episodes: int = 1000,
@@ -286,11 +342,25 @@ class NeuralSRAgent:
 
                 # Train on a batch
                 if self.buffer.size >= self.batch_size:
-                    batch = self.buffer.sample_uniform(
-                        self.batch_size, self.device
-                    )
-                    sf_loss = self._update_sf(batch)
-                    rw_loss = self._update_reward_weights(batch)
+                    if self._use_per:
+                        beta = self._get_per_beta()
+                        batch, per_indices, is_weights = \
+                            self.buffer.sample_prioritized(
+                                self.batch_size, beta, self.device)
+                        is_weights_t = torch.as_tensor(
+                            is_weights, dtype=torch.float32,
+                            device=self.device)
+                        sf_loss, td_norms = self._update_sf_per(
+                            batch, is_weights_t)
+                        self.buffer.update_priorities(
+                            per_indices, td_norms.cpu().numpy())
+                        rw_loss = self._update_reward_weights(batch)
+                    else:
+                        batch = self.buffer.sample_uniform(
+                            self.batch_size, self.device
+                        )
+                        sf_loss = self._update_sf(batch)
+                        rw_loss = self._update_reward_weights(batch)
 
                     self.training_log['sf_loss'].append(sf_loss)
                     self.training_log['reward_loss'].append(rw_loss)
@@ -313,6 +383,26 @@ class NeuralSRAgent:
                     break
 
             self.buffer.end_episode()
+
+            # HER: relabel failed trajectory with achieved goals
+            # Multiplies effective data ~k× without extra env steps.
+            if self._use_her:
+                self.buffer.add_her_transitions(
+                    goal_indices=self._her_goal_indices,
+                    k=self._her_k,
+                    reward_fn=self._reward_shaping_fn,
+                )
+
+            # Hippocampal replay: replay complete past episodes
+            # at the end of each training episode for temporal coherence
+            if (self._use_episodic_replay
+                    and self.buffer._episode_starts):
+                episodes = self.buffer.sample_episodes(
+                    self._episodic_replay_episodes, self.device)
+                for ep_batch in episodes:
+                    self._update_sf(ep_batch)
+                    self._update_reward_weights(ep_batch)
+
             self.training_log['episode_reward'].append(ep_reward)
             self.training_log['episode_steps'].append(ep_steps)
             self.training_log['epsilon'].append(self.epsilon)
@@ -358,12 +448,19 @@ class NeuralSRAgent:
         O(B * n_actions) to O(B * n_action_candidates), a ~10x speedup
         for HalfCheetah.
 
+        Skips when SF network is frozen (staged learning Phase 3).
+
         Args:
             batch: Dict with 'obs', 'actions', 'rewards', 'next_obs', 'dones'.
 
         Returns:
-            Scalar loss value.
+            Scalar loss value (0.0 if frozen).
         """
+        # Skip if SF net is frozen (staged learning goal-focused phase)
+        if not next(self.sf_net.parameters()).requires_grad:
+            self.training_log['sf_grad_norm'].append(0.0)
+            return 0.0
+
         obs = batch['obs']
         actions = batch['actions']
         next_obs = batch['next_obs']
@@ -403,6 +500,73 @@ class NeuralSRAgent:
         self.training_log['sf_grad_norm'].append(sf_grad_norm.item())
         return loss.item()
 
+    def _get_per_beta(self) -> float:
+        """Compute current PER importance-sampling beta via linear annealing."""
+        fraction = min(
+            1.0,
+            self.total_steps / max(1, self._per_beta_annealing_steps),
+        )
+        return self._per_beta_start + fraction * (
+            self._per_beta_end - self._per_beta_start
+        )
+
+    def _update_sf_per(
+        self, batch: Dict[str, torch.Tensor], is_weights: torch.Tensor,
+    ) -> Tuple[float, torch.Tensor]:
+        """SF update with PER importance sampling weights.
+
+        Same forward pass as _update_sf(), but uses the per-sample loss
+        function and returns TD error norms for priority updates.
+
+        Skips when SF network is frozen (staged learning Phase 3).
+
+        Args:
+            batch: Transition batch dict.
+            is_weights: IS weights from prioritized sampling, shape (B,).
+
+        Returns:
+            Tuple of (scalar_loss, td_error_norms).
+        """
+        # Skip if SF net is frozen (staged learning goal-focused phase)
+        if not next(self.sf_net.parameters()).requires_grad:
+            self.training_log['sf_grad_norm'].append(0.0)
+            dummy_norms = torch.zeros(batch['obs'].shape[0], device=self.device)
+            return 0.0, dummy_norms
+
+        obs = batch['obs']
+        actions = batch['actions']
+        next_obs = batch['next_obs']
+        dones = batch['dones']
+
+        sf_current = self.sf_net.get_sf(obs, actions)
+        psi_next = self.reward_net(next_obs)
+
+        with torch.no_grad():
+            if (isinstance(self.sf_net, ActionConditionedSFNetwork)
+                    and self.n_actions > self._action_candidate_threshold):
+                next_actions = self._select_next_actions_subset(next_obs)
+            else:
+                all_sf_next = self.sf_net(next_obs)
+                q_next = (all_sf_next * self.w).sum(dim=-1)
+                next_actions = q_next.argmax(dim=1)
+
+            sf_target_next = self.sf_target.get_sf(next_obs, next_actions)
+
+        loss, td_error_norms = sf_td_loss_per_sample(
+            sf_current, psi_next, sf_target_next, dones, self.gamma,
+            weights=is_weights,
+        )
+
+        self.sf_optimizer.zero_grad()
+        loss.backward()
+        sf_grad_norm = nn.utils.clip_grad_norm_(
+            self.sf_net.parameters(), self.grad_clip
+        )
+        self.sf_optimizer.step()
+
+        self.training_log['sf_grad_norm'].append(sf_grad_norm.item())
+        return loss.item(), td_error_norms
+
     def _select_next_actions_subset(self, next_obs: torch.Tensor) -> torch.Tensor:
         """Approximate argmax_a Q(s', a) using random action subset sampling.
 
@@ -437,12 +601,21 @@ class NeuralSRAgent:
     def _update_reward_weights(self, batch: Dict[str, torch.Tensor]) -> float:
         """Learn reward weights w such that r(s) ≈ ψ(s)ᵀ · w.
 
+        Skips the update when reward weights are frozen (staged learning
+        Phase 2: consolidating SF representation without moving reward target).
+
         Args:
             batch: Dict with 'obs', 'rewards'.
 
         Returns:
-            Scalar loss value.
+            Scalar loss value (0.0 if frozen).
         """
+        # Skip if w is frozen (staged learning consolidation phase)
+        if not self.w.requires_grad:
+            self.training_log['rw_grad_norm'].append(0.0)
+            self.training_log['w_norm'].append(self.w.data.norm().item())
+            return 0.0
+
         obs = batch['obs']
         rewards = batch['rewards']
 

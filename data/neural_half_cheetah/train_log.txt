@@ -1,0 +1,544 @@
+/home/prashr/.local/lib/python3.10/site-packages/gymnasium/envs/registration.py:512: DeprecationWarning: [33mWARN: The environment HalfCheetah-v4 is out of date. You should consider upgrading to version `v5`.[0m
+  logger.deprecation(
+/home/prashr/.local/lib/python3.10/site-packages/gymnasium/envs/registration.py:512: DeprecationWarning: [33mWARN: The environment HalfCheetah-v4 is out of date. You should consider upgrading to version `v5`.[0m
+  logger.deprecation(
+/home/prashr/.local/lib/python3.10/site-packages/gymnasium/envs/registration.py:512: DeprecationWarning: [33mWARN: The environment HalfCheetah-v4 is out of date. You should consider upgrading to version `v5`.[0m
+  logger.deprecation(
+============================================================
+NEURAL SF HALFCHEETAH
+============================================================
+Config: sf_dim=128, hidden=(256, 256), n_bins=3 (729 actions)
+Network: action_conditioned
+Checkpoints: [500, 1000, 2000, 3000, 5000]
+Runs: 5, Eval episodes per checkpoint: 10
+
+============================================================
+PHASE A: Full training run
+============================================================
+Device: cuda
+Phase 1: Diverse exploration (2000 episodes)
+Learning with Neural SF (2000 episodes, sf_dim=128, ε: 1.000→0.05)...
+  Episode 400/2000 | Avg reward: -1430.71 | SF loss: 0.0127 | ε: 0.708 | Buffer: 200000
+  Episode 800/2000 | Avg reward: -1609.32 | SF loss: 0.0120 | ε: 0.415 | Buffer: 400000
+  Episode 1200/2000 | Avg reward: -1786.10 | SF loss: 0.0161 | ε: 0.123 | Buffer: 500000
+  Episode 1600/2000 | Avg reward: -986.95 | SF loss: 0.0234 | ε: 0.050 | Buffer: 500000
+  Episode 2000/2000 | Avg reward: -213.56 | SF loss: 0.0271 | ε: 0.050 | Buffer: 500000
+Learning complete. Total steps: 1000000
+  Buffer truncated: 500000 -> 150000 (kept 30%)
+  LR reset: SF=1.5e-04, RW=1.5e-04, cosine decay over 1500000 steps
+
+Phase 2: Mixed training (3000 episodes, 30% diverse)
+Learning with Neural SF (3000 episodes, sf_dim=128, ε: 0.300→0.05)...
+  Episode 600/3000 | Avg reward: -460.76 | SF loss: 0.0451 | ε: 0.223 | Buffer: 450000
+  Episode 1200/3000 | Avg reward: 716.21 | SF loss: 0.0772 | ε: 0.146 | Buffer: 500000
+  Episode 1800/3000 | Avg reward: 1685.57 | SF loss: 0.0891 | ε: 0.069 | Buffer: 500000
+  Episode 2400/3000 | Avg reward: 2157.57 | SF loss: 0.1664 | ε: 0.050 | Buffer: 500000
+  Episode 3000/3000 | Avg reward: 2286.81 | SF loss: 0.2135 | ε: 0.050 | Buffer: 500000
+Learning complete. Total steps: 2500000
+
+Training time: 6260.3s
+Saved checkpoint
+
+--- Training Curves ---
+  Saved figures/eval/neural_half_cheetah/training_reward.png
+  Saved figures/eval/neural_half_cheetah/sf_loss.png
+  Saved figures/eval/neural_half_cheetah/reward_loss.png
+  Saved figures/eval/neural_half_cheetah/training_steps.png
+
+--- Default Start Evaluation ---
+
+  Default Start Results (10 episodes):
+    Episode 1: 1000 steps, reward=6025.1, x_vel=8.23
+    Episode 2: 1000 steps, reward=5894.8, x_vel=7.81
+    Episode 3: 1000 steps, reward=5904.8, x_vel=7.33
+    Episode 4: 1000 steps, reward=5951.9, x_vel=5.37
+    Episode 5: 1000 steps, reward=6125.3, x_vel=6.66
+    Episode 6: 1000 steps, reward=2633.8, x_vel=-1.87
+    Episode 7: 1000 steps, reward=6148.4, x_vel=7.35
+    Episode 8: 1000 steps, reward=6171.1, x_vel=6.49
+    Episode 9: 1000 steps, reward=5808.4, x_vel=5.64
+    Episode 10: 1000 steps, reward=5888.4, x_vel=7.46
+
+  Avg steps: 1000.0
+  Avg reward: 5655.2
+  Avg final x-velocity: 6.05
+
+--- Diverse Start Evaluation ---
+
+  Diverse Start Results (10 episodes):
+    Episode 1: 1000 steps, reward=5995.0, x_vel=7.49
+    Episode 2: 1000 steps, reward=6042.9, x_vel=6.69
+    Episode 3: 1000 steps, reward=5969.8, x_vel=6.64
+    Episode 4: 1000 steps, reward=6047.7, x_vel=6.44
+    Episode 5: 1000 steps, reward=5924.0, x_vel=5.73
+    Episode 6: 1000 steps, reward=5999.0, x_vel=6.34
+    Episode 7: 1000 steps, reward=5977.7, x_vel=5.85
+    Episode 8: 1000 steps, reward=5985.5, x_vel=6.40
+    Episode 9: 1000 steps, reward=5875.8, x_vel=5.79
+    Episode 10: 1000 steps, reward=5909.0, x_vel=6.91
+
+  Avg steps: 1000.0
+  Avg reward: 5972.6
+  Avg final x-velocity: 6.43
+
+--- Video Recording ---
+  Saved figures/eval/neural_half_cheetah/velocity_trajectory.png
+  Saved video to figures/eval/neural_half_cheetah/half_cheetah_episode.mp4
+  Video: 1000 steps, reward=5965.5, avg_vel=6.46
+
+============================================================
+PHASE B: Checkpoint evaluation (learning curves)
+============================================================
+
+============================================================
+Run 1/5
+============================================================
+
+--- Checkpoint: 500 episodes (diverse=200, fixed=300) ---
+Phase 1: Diverse exploration (200 episodes)
+Learning with Neural SF (200 episodes, sf_dim=128, ε: 1.000→0.05)...
+  Episode 40/200 | Avg reward: -1432.69 | SF loss: 0.0307 | ε: 0.971 | Buffer: 20000
+  Episode 80/200 | Avg reward: -1254.56 | SF loss: 0.0235 | ε: 0.942 | Buffer: 40000
+  Episode 120/200 | Avg reward: -1493.03 | SF loss: 0.0190 | ε: 0.912 | Buffer: 60000
+  Episode 160/200 | Avg reward: -1023.91 | SF loss: 0.0161 | ε: 0.883 | Buffer: 80000
+  Episode 200/200 | Avg reward: -1480.48 | SF loss: 0.0146 | ε: 0.854 | Buffer: 100000
+Learning complete. Total steps: 100000
+  Buffer truncated: 100000 -> 30000 (kept 30%)
+  LR reset: SF=1.5e-04, RW=1.5e-04, cosine decay over 150000 steps
+
+Phase 2: Mixed training (300 episodes, 30% diverse)
+Learning with Neural SF (300 episodes, sf_dim=128, ε: 0.300→0.05)...
+  Episode 60/300 | Avg reward: -869.54 | SF loss: 0.0132 | ε: 0.292 | Buffer: 60000
+  Episode 120/300 | Avg reward: -1272.88 | SF loss: 0.0131 | ε: 0.285 | Buffer: 90000
+  Episode 180/300 | Avg reward: -1008.01 | SF loss: 0.0140 | ε: 0.277 | Buffer: 120000
+  Episode 240/300 | Avg reward: -783.99 | SF loss: 0.0152 | ε: 0.269 | Buffer: 150000
+  Episode 300/300 | Avg reward: -712.36 | SF loss: 0.0167 | ε: 0.262 | Buffer: 180000
+Learning complete. Total steps: 250000
+  => Avg reward: -30.4, Avg steps: 1000.0
+
+--- Checkpoint: 1000 episodes (diverse=400, fixed=600) ---
+Phase 1: Diverse exploration (400 episodes)
+Learning with Neural SF (400 episodes, sf_dim=128, ε: 1.000→0.05)...
+  Episode 80/400 | Avg reward: -1358.41 | SF loss: 0.0261 | ε: 0.942 | Buffer: 40000
+  Episode 160/400 | Avg reward: -1361.11 | SF loss: 0.0183 | ε: 0.883 | Buffer: 80000
+  Episode 240/400 | Avg reward: -1358.96 | SF loss: 0.0156 | ε: 0.825 | Buffer: 120000
+  Episode 320/400 | Avg reward: -1493.50 | SF loss: 0.0158 | ε: 0.766 | Buffer: 160000
+  Episode 400/400 | Avg reward: -1263.48 | SF loss: 0.0143 | ε: 0.708 | Buffer: 200000
+Learning complete. Total steps: 200000
+  Buffer truncated: 200000 -> 60000 (kept 30%)
+  LR reset: SF=1.5e-04, RW=1.5e-04, cosine decay over 300000 steps
+
+Phase 2: Mixed training (600 episodes, 30% diverse)
+Learning with Neural SF (600 episodes, sf_dim=128, ε: 0.300→0.05)...
+  Episode 120/600 | Avg reward: -1429.92 | SF loss: 0.0117 | ε: 0.285 | Buffer: 120000
+  Episode 240/600 | Avg reward: -1563.94 | SF loss: 0.0120 | ε: 0.269 | Buffer: 180000
+  Episode 360/600 | Avg reward: -1562.63 | SF loss: 0.0135 | ε: 0.254 | Buffer: 240000
+  Episode 480/600 | Avg reward: -1437.47 | SF loss: 0.0160 | ε: 0.238 | Buffer: 300000
+  Episode 600/600 | Avg reward: -1251.56 | SF loss: 0.0182 | ε: 0.223 | Buffer: 360000
+Learning complete. Total steps: 500000
+  => Avg reward: -35.8, Avg steps: 1000.0
+
+--- Checkpoint: 2000 episodes (diverse=800, fixed=1200) ---
+Phase 1: Diverse exploration (800 episodes)
+Learning with Neural SF (800 episodes, sf_dim=128, ε: 1.000→0.05)...
+  Episode 160/800 | Avg reward: -1464.01 | SF loss: 0.0166 | ε: 0.883 | Buffer: 80000
+  Episode 320/800 | Avg reward: -1289.37 | SF loss: 0.0120 | ε: 0.766 | Buffer: 160000
+  Episode 480/800 | Avg reward: -1406.25 | SF loss: 0.0100 | ε: 0.649 | Buffer: 240000
+  Episode 640/800 | Avg reward: -1349.26 | SF loss: 0.0088 | ε: 0.532 | Buffer: 320000
+  Episode 800/800 | Avg reward: -1542.36 | SF loss: 0.0089 | ε: 0.415 | Buffer: 400000
+Learning complete. Total steps: 400000
+  Buffer truncated: 400000 -> 120000 (kept 30%)
+  LR reset: SF=1.5e-04, RW=1.5e-04, cosine decay over 600000 steps
+
+Phase 2: Mixed training (1200 episodes, 30% diverse)
+Learning with Neural SF (1200 episodes, sf_dim=128, ε: 0.300→0.05)...
+  Episode 240/1200 | Avg reward: -1582.31 | SF loss: 0.0078 | ε: 0.269 | Buffer: 240000
+  Episode 480/1200 | Avg reward: -1514.10 | SF loss: 0.0089 | ε: 0.238 | Buffer: 360000
+  Episode 720/1200 | Avg reward: -1429.01 | SF loss: 0.0141 | ε: 0.208 | Buffer: 480000
+  Episode 960/1200 | Avg reward: -1112.42 | SF loss: 0.0156 | ε: 0.177 | Buffer: 500000
+  Episode 1200/1200 | Avg reward: -689.57 | SF loss: 0.0294 | ε: 0.146 | Buffer: 500000
+Learning complete. Total steps: 1000000
+  => Avg reward: 1854.2, Avg steps: 1000.0
+
+--- Checkpoint: 3000 episodes (diverse=1200, fixed=1800) ---
+Phase 1: Diverse exploration (1200 episodes)
+Learning with Neural SF (1200 episodes, sf_dim=128, ε: 1.000→0.05)...
+  Episode 240/1200 | Avg reward: -1467.47 | SF loss: 0.0151 | ε: 0.825 | Buffer: 120000
+  Episode 480/1200 | Avg reward: -1393.18 | SF loss: 0.0134 | ε: 0.649 | Buffer: 240000
+  Episode 720/1200 | Avg reward: -1571.57 | SF loss: 0.0146 | ε: 0.474 | Buffer: 360000
+  Episode 960/1200 | Avg reward: -1782.91 | SF loss: 0.0174 | ε: 0.298 | Buffer: 480000
+  Episode 1200/1200 | Avg reward: -1591.57 | SF loss: 0.0208 | ε: 0.123 | Buffer: 500000
+Learning complete. Total steps: 600000
+  Buffer truncated: 500000 -> 150000 (kept 30%)
+  LR reset: SF=1.5e-04, RW=1.5e-04, cosine decay over 900000 steps
+
+Phase 2: Mixed training (1800 episodes, 30% diverse)
+Learning with Neural SF (1800 episodes, sf_dim=128, ε: 0.300→0.05)...
+  Episode 360/1800 | Avg reward: -1515.57 | SF loss: 0.0209 | ε: 0.254 | Buffer: 330000
+  Episode 720/1800 | Avg reward: -1138.03 | SF loss: 0.0388 | ε: 0.208 | Buffer: 500000
+  Episode 1080/1800 | Avg reward: -269.51 | SF loss: 0.0424 | ε: 0.162 | Buffer: 500000
+  Episode 1440/1800 | Avg reward: 813.56 | SF loss: 0.0611 | ε: 0.115 | Buffer: 500000
+  Episode 1800/1800 | Avg reward: 1373.12 | SF loss: 0.0876 | ε: 0.069 | Buffer: 500000
+Learning complete. Total steps: 1500000
+  => Avg reward: 3453.0, Avg steps: 1000.0
+
+--- Checkpoint: 5000 episodes (diverse=2000, fixed=3000) ---
+Phase 1: Diverse exploration (2000 episodes)
+Learning with Neural SF (2000 episodes, sf_dim=128, ε: 1.000→0.05)...
+  Episode 400/2000 | Avg reward: -1372.95 | SF loss: 0.0114 | ε: 0.708 | Buffer: 200000
+  Episode 800/2000 | Avg reward: -1405.88 | SF loss: 0.0107 | ε: 0.415 | Buffer: 400000
+  Episode 1200/2000 | Avg reward: -1379.32 | SF loss: 0.0136 | ε: 0.123 | Buffer: 500000
+  Episode 1600/2000 | Avg reward: -854.02 | SF loss: 0.0177 | ε: 0.050 | Buffer: 500000
+  Episode 2000/2000 | Avg reward: -801.92 | SF loss: 0.0212 | ε: 0.050 | Buffer: 500000
+Learning complete. Total steps: 1000000
+  Buffer truncated: 500000 -> 150000 (kept 30%)
+  LR reset: SF=1.5e-04, RW=1.5e-04, cosine decay over 1500000 steps
+
+Phase 2: Mixed training (3000 episodes, 30% diverse)
+Learning with Neural SF (3000 episodes, sf_dim=128, ε: 0.300→0.05)...
+  Episode 600/3000 | Avg reward: -419.08 | SF loss: 0.0300 | ε: 0.223 | Buffer: 450000
+  Episode 1200/3000 | Avg reward: 787.51 | SF loss: 0.0700 | ε: 0.146 | Buffer: 500000
+  Episode 1800/3000 | Avg reward: 1717.94 | SF loss: 0.0850 | ε: 0.069 | Buffer: 500000
+  Episode 2400/3000 | Avg reward: 2207.01 | SF loss: 0.1294 | ε: 0.050 | Buffer: 500000
+  Episode 3000/3000 | Avg reward: 2307.91 | SF loss: 0.1566 | ε: 0.050 | Buffer: 500000
+Learning complete. Total steps: 2500000
+  => Avg reward: 6151.3, Avg steps: 1000.0
+
+============================================================
+Run 2/5
+============================================================
+
+--- Checkpoint: 500 episodes (diverse=200, fixed=300) ---
+Phase 1: Diverse exploration (200 episodes)
+Learning with Neural SF (200 episodes, sf_dim=128, ε: 1.000→0.05)...
+  Episode 40/200 | Avg reward: -1466.01 | SF loss: 0.0317 | ε: 0.971 | Buffer: 20000
+  Episode 80/200 | Avg reward: -1419.30 | SF loss: 0.0240 | ε: 0.942 | Buffer: 40000
+  Episode 120/200 | Avg reward: -1260.11 | SF loss: 0.0206 | ε: 0.912 | Buffer: 60000
+  Episode 160/200 | Avg reward: -1519.20 | SF loss: 0.0173 | ε: 0.883 | Buffer: 80000
+  Episode 200/200 | Avg reward: -1130.12 | SF loss: 0.0160 | ε: 0.854 | Buffer: 100000
+Learning complete. Total steps: 100000
+  Buffer truncated: 100000 -> 30000 (kept 30%)
+  LR reset: SF=1.5e-04, RW=1.5e-04, cosine decay over 150000 steps
+
+Phase 2: Mixed training (300 episodes, 30% diverse)
+Learning with Neural SF (300 episodes, sf_dim=128, ε: 0.300→0.05)...
+  Episode 60/300 | Avg reward: -1582.49 | SF loss: 0.0137 | ε: 0.292 | Buffer: 60000
+  Episode 120/300 | Avg reward: -1592.71 | SF loss: 0.0130 | ε: 0.285 | Buffer: 90000
+  Episode 180/300 | Avg reward: -1708.39 | SF loss: 0.0133 | ε: 0.277 | Buffer: 120000
+  Episode 240/300 | Avg reward: -1601.37 | SF loss: 0.0145 | ε: 0.269 | Buffer: 150000
+  Episode 300/300 | Avg reward: -1563.86 | SF loss: 0.0162 | ε: 0.262 | Buffer: 180000
+Learning complete. Total steps: 250000
+  => Avg reward: -457.0, Avg steps: 1000.0
+
+--- Checkpoint: 1000 episodes (diverse=400, fixed=600) ---
+Phase 1: Diverse exploration (400 episodes)
+Learning with Neural SF (400 episodes, sf_dim=128, ε: 1.000→0.05)...
+  Episode 80/400 | Avg reward: -1412.37 | SF loss: 0.0265 | ε: 0.942 | Buffer: 40000
+  Episode 160/400 | Avg reward: -1398.84 | SF loss: 0.0191 | ε: 0.883 | Buffer: 80000
+  Episode 240/400 | Avg reward: -1516.09 | SF loss: 0.0162 | ε: 0.825 | Buffer: 120000
+  Episode 320/400 | Avg reward: -1365.71 | SF loss: 0.0148 | ε: 0.766 | Buffer: 160000
+  Episode 400/400 | Avg reward: -1358.75 | SF loss: 0.0139 | ε: 0.708 | Buffer: 200000
+Learning complete. Total steps: 200000
+  Buffer truncated: 200000 -> 60000 (kept 30%)
+  LR reset: SF=1.5e-04, RW=1.5e-04, cosine decay over 300000 steps
+
+Phase 2: Mixed training (600 episodes, 30% diverse)
+Learning with Neural SF (600 episodes, sf_dim=128, ε: 0.300→0.05)...
+  Episode 120/600 | Avg reward: -1558.48 | SF loss: 0.0117 | ε: 0.285 | Buffer: 120000
+  Episode 240/600 | Avg reward: -1648.39 | SF loss: 0.0126 | ε: 0.269 | Buffer: 180000
+  Episode 360/600 | Avg reward: -1646.29 | SF loss: 0.0138 | ε: 0.254 | Buffer: 240000
+  Episode 480/600 | Avg reward: -1416.20 | SF loss: 0.0163 | ε: 0.238 | Buffer: 300000
+  Episode 600/600 | Avg reward: -1331.70 | SF loss: 0.0192 | ε: 0.223 | Buffer: 360000
+Learning complete. Total steps: 500000
+  => Avg reward: 300.0, Avg steps: 1000.0
+
+--- Checkpoint: 2000 episodes (diverse=800, fixed=1200) ---
+Phase 1: Diverse exploration (800 episodes)
+Learning with Neural SF (800 episodes, sf_dim=128, ε: 1.000→0.05)...
+  Episode 160/800 | Avg reward: -1377.63 | SF loss: 0.0164 | ε: 0.883 | Buffer: 80000
+  Episode 320/800 | Avg reward: -1430.13 | SF loss: 0.0130 | ε: 0.766 | Buffer: 160000
+  Episode 480/800 | Avg reward: -1430.80 | SF loss: 0.0124 | ε: 0.649 | Buffer: 240000
+  Episode 640/800 | Avg reward: -1503.32 | SF loss: 0.0127 | ε: 0.532 | Buffer: 320000
+  Episode 800/800 | Avg reward: -1703.86 | SF loss: 0.0140 | ε: 0.415 | Buffer: 400000
+Learning complete. Total steps: 400000
+  Buffer truncated: 400000 -> 120000 (kept 30%)
+  LR reset: SF=1.5e-04, RW=1.5e-04, cosine decay over 600000 steps
+
+Phase 2: Mixed training (1200 episodes, 30% diverse)
+Learning with Neural SF (1200 episodes, sf_dim=128, ε: 0.300→0.05)...
+  Episode 240/1200 | Avg reward: -1646.90 | SF loss: 0.0145 | ε: 0.269 | Buffer: 240000
+  Episode 480/1200 | Avg reward: -1417.44 | SF loss: 0.0173 | ε: 0.238 | Buffer: 360000
+  Episode 720/1200 | Avg reward: -1234.97 | SF loss: 0.0233 | ε: 0.208 | Buffer: 480000
+  Episode 960/1200 | Avg reward: -926.95 | SF loss: 0.0264 | ε: 0.177 | Buffer: 500000
+  Episode 1200/1200 | Avg reward: -443.30 | SF loss: 0.0393 | ε: 0.146 | Buffer: 500000
+Learning complete. Total steps: 1000000
+  => Avg reward: 1564.6, Avg steps: 1000.0
+
+--- Checkpoint: 3000 episodes (diverse=1200, fixed=1800) ---
+Phase 1: Diverse exploration (1200 episodes)
+Learning with Neural SF (1200 episodes, sf_dim=128, ε: 1.000→0.05)...
+  Episode 240/1200 | Avg reward: -1390.83 | SF loss: 0.0153 | ε: 0.825 | Buffer: 120000
+  Episode 480/1200 | Avg reward: -1508.88 | SF loss: 0.0120 | ε: 0.649 | Buffer: 240000
+  Episode 720/1200 | Avg reward: -1738.28 | SF loss: 0.0123 | ε: 0.474 | Buffer: 360000
+  Episode 960/1200 | Avg reward: -1732.05 | SF loss: 0.0142 | ε: 0.298 | Buffer: 480000
+  Episode 1200/1200 | Avg reward: -1608.87 | SF loss: 0.0184 | ε: 0.123 | Buffer: 500000
+Learning complete. Total steps: 600000
+  Buffer truncated: 500000 -> 150000 (kept 30%)
+  LR reset: SF=1.5e-04, RW=1.5e-04, cosine decay over 900000 steps
+
+Phase 2: Mixed training (1800 episodes, 30% diverse)
+Learning with Neural SF (1800 episodes, sf_dim=128, ε: 0.300→0.05)...
+  Episode 360/1800 | Avg reward: -1536.41 | SF loss: 0.0210 | ε: 0.254 | Buffer: 330000
+  Episode 720/1800 | Avg reward: -1070.60 | SF loss: 0.0248 | ε: 0.208 | Buffer: 500000
+  Episode 1080/1800 | Avg reward: -542.95 | SF loss: 0.0371 | ε: 0.162 | Buffer: 500000
+  Episode 1440/1800 | Avg reward: 418.33 | SF loss: 0.0573 | ε: 0.115 | Buffer: 500000
+  Episode 1800/1800 | Avg reward: 1286.58 | SF loss: 0.0710 | ε: 0.069 | Buffer: 500000
+Learning complete. Total steps: 1500000
+  => Avg reward: 2663.4, Avg steps: 1000.0
+
+--- Checkpoint: 5000 episodes (diverse=2000, fixed=3000) ---
+Phase 1: Diverse exploration (2000 episodes)
+Learning with Neural SF (2000 episodes, sf_dim=128, ε: 1.000→0.05)...
+  Episode 400/2000 | Avg reward: -1439.55 | SF loss: 0.0096 | ε: 0.708 | Buffer: 200000
+  Episode 800/2000 | Avg reward: -1261.92 | SF loss: 0.0078 | ε: 0.415 | Buffer: 400000
+  Episode 1200/2000 | Avg reward: -1213.40 | SF loss: 0.0108 | ε: 0.123 | Buffer: 500000
+  Episode 1600/2000 | Avg reward: -885.61 | SF loss: 0.0166 | ε: 0.050 | Buffer: 500000
+  Episode 2000/2000 | Avg reward: -858.15 | SF loss: 0.0221 | ε: 0.050 | Buffer: 500000
+Learning complete. Total steps: 1000000
+  Buffer truncated: 500000 -> 150000 (kept 30%)
+  LR reset: SF=1.5e-04, RW=1.5e-04, cosine decay over 1500000 steps
+
+Phase 2: Mixed training (3000 episodes, 30% diverse)
+Learning with Neural SF (3000 episodes, sf_dim=128, ε: 0.300→0.05)...
+  Episode 600/3000 | Avg reward: -483.18 | SF loss: 0.0309 | ε: 0.223 | Buffer: 450000
+  Episode 1200/3000 | Avg reward: 908.15 | SF loss: 0.0486 | ε: 0.146 | Buffer: 500000
+  Episode 1800/3000 | Avg reward: 1754.71 | SF loss: 0.0889 | ε: 0.069 | Buffer: 500000
+  Episode 2400/3000 | Avg reward: 2182.36 | SF loss: 0.1355 | ε: 0.050 | Buffer: 500000
+  Episode 3000/3000 | Avg reward: 2295.19 | SF loss: 0.1575 | ε: 0.050 | Buffer: 500000
+Learning complete. Total steps: 2500000
+  => Avg reward: 6156.0, Avg steps: 1000.0
+
+============================================================
+Run 3/5
+============================================================
+
+--- Checkpoint: 500 episodes (diverse=200, fixed=300) ---
+Phase 1: Diverse exploration (200 episodes)
+Learning with Neural SF (200 episodes, sf_dim=128, ε: 1.000→0.05)...
+  Episode 40/200 | Avg reward: -1500.25 | SF loss: 0.0331 | ε: 0.971 | Buffer: 20000
+  Episode 80/200 | Avg reward: -1299.81 | SF loss: 0.0261 | ε: 0.942 | Buffer: 40000
+  Episode 120/200 | Avg reward: -1341.79 | SF loss: 0.0214 | ε: 0.912 | Buffer: 60000
+  Episode 160/200 | Avg reward: -1373.51 | SF loss: 0.0192 | ε: 0.883 | Buffer: 80000
+  Episode 200/200 | Avg reward: -1205.11 | SF loss: 0.0176 | ε: 0.854 | Buffer: 100000
+Learning complete. Total steps: 100000
+  Buffer truncated: 100000 -> 30000 (kept 30%)
+  LR reset: SF=1.5e-04, RW=1.5e-04, cosine decay over 150000 steps
+
+Phase 2: Mixed training (300 episodes, 30% diverse)
+Learning with Neural SF (300 episodes, sf_dim=128, ε: 0.300→0.05)...
+  Episode 60/300 | Avg reward: -689.55 | SF loss: 0.0158 | ε: 0.292 | Buffer: 60000
+  Episode 120/300 | Avg reward: -1064.15 | SF loss: 0.0158 | ε: 0.285 | Buffer: 90000
+  Episode 180/300 | Avg reward: -1236.92 | SF loss: 0.0163 | ε: 0.277 | Buffer: 120000
+  Episode 240/300 | Avg reward: -1153.47 | SF loss: 0.0173 | ε: 0.269 | Buffer: 150000
+  Episode 300/300 | Avg reward: -1144.46 | SF loss: 0.0191 | ε: 0.262 | Buffer: 180000
+Learning complete. Total steps: 250000
+  => Avg reward: -235.0, Avg steps: 1000.0
+
+--- Checkpoint: 1000 episodes (diverse=400, fixed=600) ---
+Phase 1: Diverse exploration (400 episodes)
+Learning with Neural SF (400 episodes, sf_dim=128, ε: 1.000→0.05)...
+  Episode 80/400 | Avg reward: -1496.53 | SF loss: 0.0234 | ε: 0.942 | Buffer: 40000
+  Episode 160/400 | Avg reward: -1532.72 | SF loss: 0.0161 | ε: 0.883 | Buffer: 80000
+  Episode 240/400 | Avg reward: -1365.06 | SF loss: 0.0128 | ε: 0.825 | Buffer: 120000
+  Episode 320/400 | Avg reward: -1223.52 | SF loss: 0.0111 | ε: 0.766 | Buffer: 160000
+  Episode 400/400 | Avg reward: -1191.51 | SF loss: 0.0100 | ε: 0.708 | Buffer: 200000
+Learning complete. Total steps: 200000
+  Buffer truncated: 200000 -> 60000 (kept 30%)
+  LR reset: SF=1.5e-04, RW=1.5e-04, cosine decay over 300000 steps
+
+Phase 2: Mixed training (600 episodes, 30% diverse)
+Learning with Neural SF (600 episodes, sf_dim=128, ε: 0.300→0.05)...
+  Episode 120/600 | Avg reward: -934.68 | SF loss: 0.0089 | ε: 0.285 | Buffer: 120000
+  Episode 240/600 | Avg reward: -1267.25 | SF loss: 0.0092 | ε: 0.269 | Buffer: 180000
+  Episode 360/600 | Avg reward: -1511.11 | SF loss: 0.0099 | ε: 0.254 | Buffer: 240000
+  Episode 480/600 | Avg reward: -1407.24 | SF loss: 0.0111 | ε: 0.238 | Buffer: 300000
+  Episode 600/600 | Avg reward: -1412.94 | SF loss: 0.0124 | ε: 0.223 | Buffer: 360000
+Learning complete. Total steps: 500000
+  => Avg reward: -3.5, Avg steps: 1000.0
+
+--- Checkpoint: 2000 episodes (diverse=800, fixed=1200) ---
+Phase 1: Diverse exploration (800 episodes)
+Learning with Neural SF (800 episodes, sf_dim=128, ε: 1.000→0.05)...
+  Episode 160/800 | Avg reward: -1384.67 | SF loss: 0.0170 | ε: 0.883 | Buffer: 80000
+  Episode 320/800 | Avg reward: -1418.60 | SF loss: 0.0132 | ε: 0.766 | Buffer: 160000
+  Episode 480/800 | Avg reward: -1407.82 | SF loss: 0.0112 | ε: 0.649 | Buffer: 240000
+  Episode 640/800 | Avg reward: -1472.09 | SF loss: 0.0110 | ε: 0.532 | Buffer: 320000
+  Episode 800/800 | Avg reward: -1517.68 | SF loss: 0.0117 | ε: 0.415 | Buffer: 400000
+Learning complete. Total steps: 400000
+  Buffer truncated: 400000 -> 120000 (kept 30%)
+  LR reset: SF=1.5e-04, RW=1.5e-04, cosine decay over 600000 steps
+
+Phase 2: Mixed training (1200 episodes, 30% diverse)
+Learning with Neural SF (1200 episodes, sf_dim=128, ε: 0.300→0.05)...
+  Episode 240/1200 | Avg reward: -1674.33 | SF loss: 0.0130 | ε: 0.269 | Buffer: 240000
+  Episode 480/1200 | Avg reward: -1549.71 | SF loss: 0.0162 | ε: 0.238 | Buffer: 360000
+  Episode 720/1200 | Avg reward: -1614.49 | SF loss: 0.0237 | ε: 0.208 | Buffer: 480000
+  Episode 960/1200 | Avg reward: -1274.46 | SF loss: 0.0316 | ε: 0.177 | Buffer: 500000
+  Episode 1200/1200 | Avg reward: -1033.86 | SF loss: 0.0382 | ε: 0.146 | Buffer: 500000
+Learning complete. Total steps: 1000000
+  => Avg reward: 901.6, Avg steps: 1000.0
+
+--- Checkpoint: 3000 episodes (diverse=1200, fixed=1800) ---
+Phase 1: Diverse exploration (1200 episodes)
+Learning with Neural SF (1200 episodes, sf_dim=128, ε: 1.000→0.05)...
+  Episode 240/1200 | Avg reward: -1405.82 | SF loss: 0.0136 | ε: 0.825 | Buffer: 120000
+  Episode 480/1200 | Avg reward: -1538.46 | SF loss: 0.0106 | ε: 0.649 | Buffer: 240000
+  Episode 720/1200 | Avg reward: -1432.58 | SF loss: 0.0106 | ε: 0.474 | Buffer: 360000
+  Episode 960/1200 | Avg reward: -1439.13 | SF loss: 0.0118 | ε: 0.298 | Buffer: 480000
+  Episode 1200/1200 | Avg reward: -1599.25 | SF loss: 0.0153 | ε: 0.123 | Buffer: 500000
+Learning complete. Total steps: 600000
+  Buffer truncated: 500000 -> 150000 (kept 30%)
+  LR reset: SF=1.5e-04, RW=1.5e-04, cosine decay over 900000 steps
+
+Phase 2: Mixed training (1800 episodes, 30% diverse)
+Learning with Neural SF (1800 episodes, sf_dim=128, ε: 0.300→0.05)...
+  Episode 360/1800 | Avg reward: -1512.75 | SF loss: 0.0199 | ε: 0.254 | Buffer: 330000
+  Episode 720/1800 | Avg reward: -1117.62 | SF loss: 0.0271 | ε: 0.208 | Buffer: 500000
+  Episode 1080/1800 | Avg reward: -470.23 | SF loss: 0.0318 | ε: 0.162 | Buffer: 500000
+  Episode 1440/1800 | Avg reward: 670.40 | SF loss: 0.0438 | ε: 0.115 | Buffer: 500000
+  Episode 1800/1800 | Avg reward: 1484.74 | SF loss: 0.0760 | ε: 0.069 | Buffer: 500000
+Learning complete. Total steps: 1500000
+  => Avg reward: 3695.1, Avg steps: 1000.0
+
+--- Checkpoint: 5000 episodes (diverse=2000, fixed=3000) ---
+Phase 1: Diverse exploration (2000 episodes)
+Learning with Neural SF (2000 episodes, sf_dim=128, ε: 1.000→0.05)...
+  Episode 400/2000 | Avg reward: -1455.09 | SF loss: 0.0101 | ε: 0.708 | Buffer: 200000
+  Episode 800/2000 | Avg reward: -1603.60 | SF loss: 0.0085 | ε: 0.415 | Buffer: 400000
+  Episode 1200/2000 | Avg reward: -1614.58 | SF loss: 0.0106 | ε: 0.123 | Buffer: 500000
+  Episode 1600/2000 | Avg reward: -1281.46 | SF loss: 0.0134 | ε: 0.050 | Buffer: 500000
+  Episode 2000/2000 | Avg reward: -714.67 | SF loss: 0.0198 | ε: 0.050 | Buffer: 500000
+Learning complete. Total steps: 1000000
+  Buffer truncated: 500000 -> 150000 (kept 30%)
+  LR reset: SF=1.5e-04, RW=1.5e-04, cosine decay over 1500000 steps
+
+Phase 2: Mixed training (3000 episodes, 30% diverse)
+Learning with Neural SF (3000 episodes, sf_dim=128, ε: 0.300→0.05)...
+  Episode 600/3000 | Avg reward: -724.48 | SF loss: 0.0309 | ε: 0.223 | Buffer: 450000
+  Episode 1200/3000 | Avg reward: 471.44 | SF loss: 0.0425 | ε: 0.146 | Buffer: 500000
+  Episode 1800/3000 | Avg reward: 1383.87 | SF loss: 0.0664 | ε: 0.069 | Buffer: 500000
+  Episode 2400/3000 | Avg reward: 2114.72 | SF loss: 0.1007 | ε: 0.050 | Buffer: 500000
+  Episode 3000/3000 | Avg reward: 2216.31 | SF loss: 0.1405 | ε: 0.050 | Buffer: 500000
+Learning complete. Total steps: 2500000
+  => Avg reward: 5944.9, Avg steps: 1000.0
+
+============================================================
+Run 4/5
+============================================================
+
+--- Checkpoint: 500 episodes (diverse=200, fixed=300) ---
+Phase 1: Diverse exploration (200 episodes)
+Learning with Neural SF (200 episodes, sf_dim=128, ε: 1.000→0.05)...
+  Episode 40/200 | Avg reward: -1444.86 | SF loss: 0.0371 | ε: 0.971 | Buffer: 20000
+  Episode 80/200 | Avg reward: -1371.95 | SF loss: 0.0264 | ε: 0.942 | Buffer: 40000
+  Episode 120/200 | Avg reward: -1507.08 | SF loss: 0.0202 | ε: 0.912 | Buffer: 60000
+  Episode 160/200 | Avg reward: -1536.80 | SF loss: 0.0170 | ε: 0.883 | Buffer: 80000
+  Episode 200/200 | Avg reward: -1437.97 | SF loss: 0.0153 | ε: 0.854 | Buffer: 100000
+Learning complete. Total steps: 100000
+  Buffer truncated: 100000 -> 30000 (kept 30%)
+  LR reset: SF=1.5e-04, RW=1.5e-04, cosine decay over 150000 steps
+
+Phase 2: Mixed training (300 episodes, 30% diverse)
+Learning with Neural SF (300 episodes, sf_dim=128, ε: 0.300→0.05)...
+  Episode 60/300 | Avg reward: -1403.77 | SF loss: 0.0129 | ε: 0.292 | Buffer: 60000
+  Episode 120/300 | Avg reward: -1921.70 | SF loss: 0.0127 | ε: 0.285 | Buffer: 90000
+  Episode 180/300 | Avg reward: -1931.82 | SF loss: 0.0128 | ε: 0.277 | Buffer: 120000
+  Episode 240/300 | Avg reward: -1814.89 | SF loss: 0.0138 | ε: 0.269 | Buffer: 150000
+  Episode 300/300 | Avg reward: -1830.14 | SF loss: 0.0154 | ε: 0.262 | Buffer: 180000
+Learning complete. Total steps: 250000
+  => Avg reward: -411.8, Avg steps: 1000.0
+
+--- Checkpoint: 1000 episodes (diverse=400, fixed=600) ---
+Phase 1: Diverse exploration (400 episodes)
+Learning with Neural SF (400 episodes, sf_dim=128, ε: 1.000→0.05)...
+  Episode 80/400 | Avg reward: -1478.00 | SF loss: 0.0236 | ε: 0.942 | Buffer: 40000
+  Episode 160/400 | Avg reward: -1264.76 | SF loss: 0.0153 | ε: 0.883 | Buffer: 80000
+  Episode 240/400 | Avg reward: -1454.69 | SF loss: 0.0112 | ε: 0.825 | Buffer: 120000
+  Episode 320/400 | Avg reward: -1589.37 | SF loss: 0.0094 | ε: 0.766 | Buffer: 160000
+  Episode 400/400 | Avg reward: -1241.24 | SF loss: 0.0087 | ε: 0.708 | Buffer: 200000
+Learning complete. Total steps: 200000
+  Buffer truncated: 200000 -> 60000 (kept 30%)
+  LR reset: SF=1.5e-04, RW=1.5e-04, cosine decay over 300000 steps
+
+Phase 2: Mixed training (600 episodes, 30% diverse)
+Learning with Neural SF (600 episodes, sf_dim=128, ε: 0.300→0.05)...
+  Episode 120/600 | Avg reward: -1756.47 | SF loss: 0.0068 | ε: 0.285 | Buffer: 120000
+  Episode 240/600 | Avg reward: -1841.07 | SF loss: 0.0068 | ε: 0.269 | Buffer: 180000
+  Episode 360/600 | Avg reward: -1719.74 | SF loss: 0.0072 | ε: 0.254 | Buffer: 240000
+  Episode 480/600 | Avg reward: -1647.40 | SF loss: 0.0083 | ε: 0.238 | Buffer: 300000
+  Episode 600/600 | Avg reward: -1793.09 | SF loss: 0.0104 | ε: 0.223 | Buffer: 360000
+Learning complete. Total steps: 500000
+  => Avg reward: -189.4, Avg steps: 1000.0
+
+--- Checkpoint: 2000 episodes (diverse=800, fixed=1200) ---
+Phase 1: Diverse exploration (800 episodes)
+Learning with Neural SF (800 episodes, sf_dim=128, ε: 1.000→0.05)...
+  Episode 160/800 | Avg reward: -1406.75 | SF loss: 0.0151 | ε: 0.883 | Buffer: 80000
+  Episode 320/800 | Avg reward: -1358.30 | SF loss: 0.0103 | ε: 0.766 | Buffer: 160000
+  Episode 480/800 | Avg reward: -1329.01 | SF loss: 0.0089 | ε: 0.649 | Buffer: 240000
+  Episode 640/800 | Avg reward: -1221.20 | SF loss: 0.0090 | ε: 0.532 | Buffer: 320000
+  Episode 800/800 | Avg reward: -1461.88 | SF loss: 0.0107 | ε: 0.415 | Buffer: 400000
+Learning complete. Total steps: 400000
+  Buffer truncated: 400000 -> 120000 (kept 30%)
+  LR reset: SF=1.5e-04, RW=1.5e-04, cosine decay over 600000 steps
+
+Phase 2: Mixed training (1200 episodes, 30% diverse)
+Learning with Neural SF (1200 episodes, sf_dim=128, ε: 0.300→0.05)...
+  Episode 240/1200 | Avg reward: -1468.89 | SF loss: 0.0103 | ε: 0.269 | Buffer: 240000
+  Episode 480/1200 | Avg reward: -1429.16 | SF loss: 0.0138 | ε: 0.238 | Buffer: 360000
+  Episode 720/1200 | Avg reward: -1349.29 | SF loss: 0.0197 | ε: 0.208 | Buffer: 480000
+  Episode 960/1200 | Avg reward: -1166.33 | SF loss: 0.0234 | ε: 0.177 | Buffer: 500000
+  Episode 1200/1200 | Avg reward: -926.19 | SF loss: 0.0337 | ε: 0.146 | Buffer: 500000
+Learning complete. Total steps: 1000000
+  => Avg reward: 467.2, Avg steps: 1000.0
+
+--- Checkpoint: 3000 episodes (diverse=1200, fixed=1800) ---
+Phase 1: Diverse exploration (1200 episodes)
+Learning with Neural SF (1200 episodes, sf_dim=128, ε: 1.000→0.05)...
+  Episode 240/1200 | Avg reward: -1484.00 | SF loss: 0.0135 | ε: 0.825 | Buffer: 120000
+  Episode 480/1200 | Avg reward: -1403.57 | SF loss: 0.0098 | ε: 0.649 | Buffer: 240000
+  Episode 720/1200 | Avg reward: -1567.84 | SF loss: 0.0088 | ε: 0.474 | Buffer: 360000
+  Episode 960/1200 | Avg reward: -1602.55 | SF loss: 0.0096 | ε: 0.298 | Buffer: 480000
+  Episode 1200/1200 | Avg reward: -1448.62 | SF loss: 0.0128 | ε: 0.123 | Buffer: 500000
+Learning complete. Total steps: 600000
+  Buffer truncated: 500000 -> 150000 (kept 30%)
+  LR reset: SF=1.5e-04, RW=1.5e-04, cosine decay over 900000 steps
+
+Phase 2: Mixed training (1800 episodes, 30% diverse)
+Learning with Neural SF (1800 episodes, sf_dim=128, ε: 0.300→0.05)...
+  Episode 360/1800 | Avg reward: -1607.83 | SF loss: 0.0200 | ε: 0.254 | Buffer: 330000
+  Episode 720/1800 | Avg reward: -1272.55 | SF loss: 0.0218 | ε: 0.208 | Buffer: 500000
+  Episode 1080/1800 | Avg reward: -686.18 | SF loss: 0.0292 | ε: 0.162 | Buffer: 500000
+  Episode 1440/1800 | Avg reward: 348.79 | SF loss: 0.0412 | ε: 0.115 | Buffer: 500000
+  Episode 1800/1800 | Avg reward: 1217.26 | SF loss: 0.0477 | ε: 0.069 | Buffer: 500000
+Learning complete. Total steps: 1500000
+  => Avg reward: 3589.4, Avg steps: 1000.0
+
+--- Checkpoint: 5000 episodes (diverse=2000, fixed=3000) ---
+Phase 1: Diverse exploration (2000 episodes)
+Learning with Neural SF (2000 episodes, sf_dim=128, ε: 1.000→0.05)...
+  Episode 400/2000 | Avg reward: -1441.44 | SF loss: 0.0105 | ε: 0.708 | Buffer: 200000
+  Episode 800/2000 | Avg reward: -1612.56 | SF loss: 0.0095 | ε: 0.415 | Buffer: 400000
+  Episode 1200/2000 | Avg reward: -1628.10 | SF loss: 0.0131 | ε: 0.123 | Buffer: 500000
+  Episode 1600/2000 | Avg reward: -1182.34 | SF loss: 0.0168 | ε: 0.050 | Buffer: 500000
+  Episode 2000/2000 | Avg reward: -340.56 | SF loss: 0.0211 | ε: 0.050 | Buffer: 500000
+Learning complete. Total steps: 1000000
+  Buffer truncated: 500000 -> 150000 (kept 30%)
+  LR reset: SF=1.5e-04, RW=1.5e-04, cosine decay over 1500000 steps
+
+Phase 2: Mixed training (3000 episodes, 30% diverse)
+Learning with Neural SF (3000 episodes, sf_dim=128, ε: 0.300→0.05)...
+  Episode 600/3000 | Avg reward: -391.18 | SF loss: 0.0367 | ε: 0.223 | Buffer: 450000
+  Episode 1200/3000 | Avg reward: 802.66 | SF loss: 0.0486 | ε: 0.146 | Buffer: 500000
+  Episode 1800/3000 | Avg reward: 1694.18 | SF loss: 0.0917 | ε: 0.069 | Buffer: 500000
+  Episode 2400/3000 | Avg reward: 2176.78 | SF loss: 0.1114 | ε: 0.050 | Buffer: 500000

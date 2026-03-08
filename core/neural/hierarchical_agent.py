@@ -574,7 +574,7 @@ class HierarchicalNeuralSRAgent(NeuralSRAgent):
                 'n_clusters': self.n_clusters,
                 'adj_list': self.adj_list,
                 'bottleneck_obs': {
-                    str(k): [o.tolist() for o in v]
+                    f"{k[0]}_{k[1]}": [o.tolist() for o in v]
                     for k, v in self.bottleneck_obs.items()
                 },
                 'n_macro_actions': self.n_macro_actions,
@@ -633,7 +633,14 @@ class HierarchicalNeuralSRAgent(NeuralSRAgent):
             # Restore bottleneck obs (keys were stringified for serialization)
             self.bottleneck_obs = {}
             for k_str, v_list in hierarchy_data['bottleneck_obs'].items():
-                key = eval(k_str)  # "(src, tgt)" → tuple
+                if '(' in k_str:
+                    # Backward compat: old checkpoints used str((src, tgt))
+                    import ast
+                    key = ast.literal_eval(k_str)
+                else:
+                    # New format: "src_tgt"
+                    parts = k_str.split('_')
+                    key = (int(parts[0]), int(parts[1]))
                 self.bottleneck_obs[key] = [
                     np.array(o, dtype=np.float32) for o in v_list
                 ]

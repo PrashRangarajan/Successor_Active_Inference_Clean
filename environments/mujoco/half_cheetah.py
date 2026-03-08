@@ -56,13 +56,13 @@ class HalfCheetahAdapter(MuJoCoAdapter):
         super().__init__(render_mode=render_mode)
 
     def _make_env(self, render_mode: Optional[str] = None) -> gym.Env:
-        """Create HalfCheetah-v4 environment."""
+        """Create HalfCheetah-v5 environment."""
         kwargs = {}
         if render_mode is not None:
             kwargs['render_mode'] = render_mode
         if self._max_episode_steps is not None:
             kwargs['max_episode_steps'] = self._max_episode_steps
-        return gym.make('HalfCheetah-v4', **kwargs)
+        return gym.make('HalfCheetah-v5', **kwargs)
 
     def _discretize_actions(self) -> np.ndarray:
         """Create grid of discrete 6D actions from per-joint bins.
