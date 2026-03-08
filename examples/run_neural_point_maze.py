@@ -113,6 +113,10 @@ def main():
                         help="Directory to save checkpoints")
     parser.add_argument("--device", type=str, default="cpu",
                         help="Torch device ('cpu' or 'cuda')")
+    parser.add_argument("--resume-phase", type=int, default=0,
+                        choices=[0, 1, 2, 3],
+                        help="Resume from end of given phase (0=start fresh, "
+                             "1=skip Phase 1, 2=skip Phase 1+2, 3=skip to eval)")
     args = parser.parse_args()
 
     cfg = NEURAL_POINTMAZE
@@ -217,24 +221,40 @@ def main():
             consolidation_eps = 100
             args.n_eval = 5
 
+        os.makedirs(args.save_dir, exist_ok=True)
+        resume = args.resume_phase
+
+        # ---- Resume from checkpoint if requested ----
+        if resume >= 1:
+            ckpt_map = {
+                1: "checkpoint_phase1.pt",
+                2: "checkpoint_phase2.pt",
+                3: "checkpoint_phase3.pt",
+            }
+            ckpt_path = os.path.join(args.save_dir, ckpt_map[resume])
+            if not os.path.exists(ckpt_path):
+                print(f"Checkpoint not found: {ckpt_path}")
+                return
+            agent.load(ckpt_path)
+            print(f"Resumed from {ckpt_path} (skipping phases 1-{resume})")
+
         t0 = time.time()
 
         # ---- Phase 1: Diverse exploration — build SF representation ----
-        print(f"Phase 1: Diverse exploration ({ep1} episodes, 100% diverse)")
-        agent.learn_environment(
-            num_episodes=ep1,
-            steps_per_episode=cfg["steps_per_episode"],
-            diverse_start=True,
-            log_interval=max(1, ep1 // 5),
-        )
-
-        os.makedirs(args.save_dir, exist_ok=True)
-        agent.save(os.path.join(args.save_dir, "checkpoint_phase1.pt"))
+        if resume < 1:
+            print(f"Phase 1: Diverse exploration ({ep1} episodes, 100% diverse)")
+            agent.learn_environment(
+                num_episodes=ep1,
+                steps_per_episode=cfg["steps_per_episode"],
+                diverse_start=True,
+                log_interval=max(1, ep1 // 5),
+            )
+            agent.save(os.path.join(args.save_dir, "checkpoint_phase1.pt"))
 
         # ---- Phase 2: SF consolidation (staged learning) ----
         # Freeze w so φ/ψ can stabilize without chasing a moving reward signal.
         # Mirrors tabular agent's 10-epoch replay pass over M.
-        if use_staged and consolidation_eps > 0:
+        if resume < 2 and use_staged and consolidation_eps > 0:
             print(f"\nPhase 2: SF consolidation ({consolidation_eps} episodes, "
                   f"w frozen, {consolidation_replay} episodic replays)")
             agent.freeze_reward_weights()
@@ -255,37 +275,41 @@ def main():
             agent.unfreeze_reward_weights()
             agent.save(os.path.join(args.save_dir, "checkpoint_phase2.pt"))
 
-        # ---- Phase boundary: truncate buffer, reset schedule ----
-        agent.truncate_buffer(keep_fraction=cfg["buffer_keep_phase2"])
-        agent.reset_epsilon(
-            new_start=cfg["epsilon_phase2_start"],
-            new_decay_steps=cfg["epsilon_phase2_decay_steps"],
-        )
-        agent.reset_lr(
-            sf_lr=cfg["lr"] * cfg["lr_phase2_fraction"],
-            rw_lr=cfg["lr_w"] * cfg["lr_phase2_fraction"],
-            decay_steps=ep2 * cfg["steps_per_episode"],
-        )
-
         # ---- Phase 3: Goal-focused — mostly fixed start ----
-        # If staged, freeze φ so only w adapts to the goal.
-        if use_staged:
-            agent.freeze_sf()
-            print(f"\nPhase 3: Goal-focused ({ep2} episodes, {frac2:.0%} diverse, "
-                  f"φ frozen, w learning)")
-        else:
-            print(f"\nPhase 2: Goal-focused ({ep2} episodes, {frac2:.0%} diverse)")
+        if resume < 3:
+            # Phase boundary: truncate buffer, reset schedule
+            if resume < 2:
+                agent.truncate_buffer(keep_fraction=cfg["buffer_keep_phase2"])
+            agent.reset_epsilon(
+                new_start=cfg["epsilon_phase2_start"],
+                new_decay_steps=cfg["epsilon_phase2_decay_steps"],
+            )
+            agent.reset_lr(
+                sf_lr=cfg["lr"] * cfg["lr_phase2_fraction"],
+                rw_lr=cfg["lr_w"] * cfg["lr_phase2_fraction"],
+                decay_steps=ep2 * cfg["steps_per_episode"],
+            )
 
-        agent.learn_environment(
-            num_episodes=ep2,
-            steps_per_episode=cfg["steps_per_episode"],
-            diverse_start=True,
-            diverse_fraction=frac2,
-            log_interval=max(1, ep2 // 5),
-        )
+            # If staged, freeze φ so only w adapts to the goal.
+            if use_staged:
+                agent.freeze_sf()
+                print(f"\nPhase 3: Goal-focused ({ep2} episodes, {frac2:.0%} diverse, "
+                      f"φ frozen, w learning)")
+            else:
+                print(f"\nPhase 2: Goal-focused ({ep2} episodes, {frac2:.0%} diverse)")
 
-        if use_staged:
-            agent.unfreeze_sf()
+            agent.learn_environment(
+                num_episodes=ep2,
+                steps_per_episode=cfg["steps_per_episode"],
+                diverse_start=True,
+                diverse_fraction=frac2,
+                log_interval=max(1, ep2 // 5),
+            )
+
+            if use_staged:
+                agent.unfreeze_sf()
+
+            agent.save(os.path.join(args.save_dir, "checkpoint_phase3.pt"))
 
         train_time = time.time() - t0
         print(f"\nTotal training time: {train_time:.1f}s")

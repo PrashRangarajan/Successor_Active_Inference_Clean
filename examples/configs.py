@@ -367,13 +367,21 @@ NEURAL_ACROBOT = {
     "eval_quick_episodes": [500, 1000, 2000],
     "eval_quick_n_runs": 5,
 
-    # Replay buffer — PER + episodic replay (opt-in)
-    "use_per": False,
+    # Staged learning — consolidate SF before goal-focused phase
+    "staged_learning": True,
+    "consolidation_episodes": 500,
+    "consolidation_episodic_replay": 10,
+
+    # Training frequency — skip some gradient updates to reduce overhead
+    "train_every": 4,
+
+    # Replay buffer — PER + episodic replay
+    "use_per": True,
     "per_alpha": 0.6,
     "per_beta_start": 0.4,
     "per_beta_end": 1.0,
-    "use_episodic_replay": False,
-    "episodic_replay_episodes": 2,
+    "use_episodic_replay": True,
+    "episodic_replay_episodes": 5,
 }
 
 # =====================================================================
