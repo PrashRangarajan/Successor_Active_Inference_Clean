@@ -110,20 +110,13 @@ See `figures/neural_point_maze/qvalue_comparison.png`:
 - Buffer: 500K, PER + episodic replay (5 eps) + HER (k=4)
 - train_every: 4 (skip 3/4 gradient steps for speed)
 
-## Vectorized Phase 1 Training
+## Vectorized Phase 1 (Removed)
 
-Added vectorized environment support for Phase 1 using `gymnasium.vector.AsyncVectorEnv`:
-
-**Usage**: `python examples/run_neural_point_maze.py --vec-envs 8 --device cuda`
-
-**Files**:
-- `environments/point_maze/wrappers.py` — DiverseStartWrapper, DiscreteActionWrapper, ContinuousObsWrapper, make_vec_env()
-- `core/neural/replay_buffer.py` — add_batch() for vectorized writes
-- `core/neural/agent.py` — select_actions_batch(), learn_phase1_vectorized()
-
-**How it works**: N parallel MuJoCo environments in subprocesses, batch action selection on GPU, batch buffer writes. Only for Phase 1 (100% diverse starts, no HER/episodic replay). Later phases use single-env loop unchanged.
-
-**Performance**: Uses N CPU cores + same GPU footprint (~518MiB). Machine has 32 threads, so 8 envs is comfortable.
+Attempted vectorized Phase 1 using `gymnasium.vector.AsyncVectorEnv` with N parallel
+MuJoCo environments. Removed because GPU training — not CPU stepping — is the actual
+bottleneck. With `train_every=4`, more envs just increase GPU load proportionally,
+negating CPU-side gains. No wall-clock speedup observed (Exp F: 8 envs ≈ same time as
+Exp D: 1 env). Code preserved in git history (commit 81008bb) for reference.
 
 ## HalfCheetah — Completed ✓
 
@@ -152,13 +145,13 @@ Added vectorized environment support for Phase 1 using `gymnasium.vector.AsyncVe
 
 ## Useful Commands
 ```bash
-# Run PointMaze with vectorized Phase 1
+# Run PointMaze
 CUDA_VISIBLE_DEVICES=0 conda run -n sai python examples/run_neural_point_maze.py \
-    --device cuda --vec-envs 8 --save-dir data/neural_point_maze_exp_X
+    --device cuda --save-dir data/neural_point_maze_exp_X
 
 # Run with experiment flags
 conda run -n sai python examples/run_neural_point_maze.py \
-    --device cuda --no-freeze-phase3 --no-staging --vec-envs 8 \
+    --device cuda --no-freeze-phase3 --no-staging \
     --save-dir data/neural_point_maze_exp_X
 
 # Evaluate only
