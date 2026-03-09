@@ -117,6 +117,13 @@ def main():
                         choices=[0, 1, 2, 3],
                         help="Resume from end of given phase (0=start fresh, "
                              "1=skip Phase 1, 2=skip Phase 1+2, 3=skip to eval)")
+    parser.add_argument("--no-freeze-phase3", action="store_true",
+                        help="Don't freeze SF in Phase 3 (joint fine-tuning)")
+    parser.add_argument("--no-staging", action="store_true",
+                        help="Disable staged learning entirely")
+    parser.add_argument("--vec-envs", type=int, default=0,
+                        help="Number of parallel envs for Phase 1 "
+                             "(0=disabled, 4-16 recommended)")
     args = parser.parse_args()
 
     cfg = NEURAL_POINTMAZE
@@ -212,7 +219,8 @@ def main():
         ep1 = cfg["train_episodes_phase1"]
         ep2 = cfg["train_episodes_phase2"]
         frac2 = cfg["diverse_fraction_phase2"]
-        use_staged = cfg.get("staged_learning", False)
+        use_staged = cfg.get("staged_learning", False) and not args.no_staging
+        no_freeze_phase3 = args.no_freeze_phase3
         consolidation_eps = cfg.get("consolidation_episodes", 1000)
         consolidation_replay = cfg.get("consolidation_episodic_replay", 10)
         if args.quick:
@@ -242,13 +250,42 @@ def main():
 
         # ---- Phase 1: Diverse exploration — build SF representation ----
         if resume < 1:
-            print(f"Phase 1: Diverse exploration ({ep1} episodes, 100% diverse)")
-            agent.learn_environment(
-                num_episodes=ep1,
-                steps_per_episode=cfg["steps_per_episode"],
-                diverse_start=True,
-                log_interval=max(1, ep1 // 5),
-            )
+            if args.vec_envs > 0:
+                from environments.point_maze.wrappers import make_vec_env
+                print(f"Phase 1: Diverse exploration ({ep1} episodes, "
+                      f"100% diverse, {args.vec_envs} parallel envs)")
+                vec_env = make_vec_env(
+                    num_envs=args.vec_envs,
+                    maze_id=cfg["maze_id"],
+                    max_episode_steps=cfg["steps_per_episode"],
+                    wall_set=base_adapter._wall_set,
+                    x_range=base_adapter._x_range,
+                    y_range=base_adapter._y_range,
+                    x_bin_edges=base_adapter.x_space,
+                    y_bin_edges=base_adapter.y_space,
+                    n_x_bins=cfg["n_x_bins"],
+                    n_y_bins=cfg["n_y_bins"],
+                )
+                try:
+                    agent.learn_phase1_vectorized(
+                        num_episodes=ep1,
+                        steps_per_episode=cfg["steps_per_episode"],
+                        num_envs=args.vec_envs,
+                        reward_fn=reward_fn,
+                        vec_env=vec_env,
+                        log_interval=max(1, ep1 // 5),
+                    )
+                finally:
+                    vec_env.close()
+            else:
+                print(f"Phase 1: Diverse exploration ({ep1} episodes, "
+                      f"100% diverse)")
+                agent.learn_environment(
+                    num_episodes=ep1,
+                    steps_per_episode=cfg["steps_per_episode"],
+                    diverse_start=True,
+                    log_interval=max(1, ep1 // 5),
+                )
             agent.save(os.path.join(args.save_dir, "checkpoint_phase1.pt"))
 
         # ---- Phase 2: SF consolidation (staged learning) ----
@@ -291,10 +328,15 @@ def main():
             )
 
             # If staged, freeze φ so only w adapts to the goal.
-            if use_staged:
+            # --no-freeze-phase3 overrides: both SF and w learn together.
+            freeze_sf = use_staged and not no_freeze_phase3
+            if freeze_sf:
                 agent.freeze_sf()
                 print(f"\nPhase 3: Goal-focused ({ep2} episodes, {frac2:.0%} diverse, "
                       f"φ frozen, w learning)")
+            elif use_staged:
+                print(f"\nPhase 3: Goal-focused ({ep2} episodes, {frac2:.0%} diverse, "
+                      f"joint fine-tuning)")
             else:
                 print(f"\nPhase 2: Goal-focused ({ep2} episodes, {frac2:.0%} diverse)")
 
@@ -306,7 +348,7 @@ def main():
                 log_interval=max(1, ep2 // 5),
             )
 
-            if use_staged:
+            if freeze_sf:
                 agent.unfreeze_sf()
 
             agent.save(os.path.join(args.save_dir, "checkpoint_phase3.pt"))

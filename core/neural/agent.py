@@ -439,6 +439,177 @@ class NeuralSRAgent:
 
         print(f"Learning complete. Total steps: {self.total_steps}")
 
+    def learn_phase1_vectorized(
+        self,
+        num_episodes: int,
+        steps_per_episode: int,
+        num_envs: int,
+        reward_fn,
+        vec_env,
+        log_interval: int = 100,
+    ):
+        """Vectorized Phase 1 training with N parallel environments.
+
+        Runs N copies of the environment in parallel using AsyncVectorEnv.
+        Only suitable for Phase 1 (100% diverse starts, no HER, no episodic
+        replay). Later phases use the single-env learn_environment().
+
+        Args:
+            num_episodes: Total target episodes to complete.
+            steps_per_episode: Max steps per episode (set by env wrapper).
+            num_envs: Number of parallel environments.
+            reward_fn: Reward shaping function: obs (6D) -> float.
+            vec_env: Pre-created AsyncVectorEnv (SAME_STEP autoreset).
+            log_interval: Episodes between console log prints.
+        """
+        print(f"Learning with Neural SF vectorized ({num_episodes} episodes, "
+              f"{num_envs} envs, sf_dim={self.sf_dim}, "
+              f"ε: {self.epsilon:.3f}→{self._epsilon_end})...")
+
+        obs_batch, _ = vec_env.reset()  # (N, obs_dim)
+
+        # Per-env episode tracking
+        ep_rewards = np.zeros(num_envs)
+        ep_steps = np.zeros(num_envs, dtype=np.int64)
+        episodes_completed = 0
+
+        # Training frequency: maintain same ratio as single-env
+        updates_per_step = max(1, num_envs // self._train_every)
+
+        while episodes_completed < num_episodes:
+            # 1. Select actions for all envs
+            actions = self.select_actions_batch(obs_batch)
+
+            # 2. Step all envs (SAME_STEP: done envs auto-reset, terminal
+            #    obs stored in infos['final_obs'])
+            next_obs, env_rewards, terms, truncs, infos = vec_env.step(actions)
+            dones = terms | truncs
+
+            # 3. Build buffer arrays — use terminal obs for done envs
+            buffer_next_obs = next_obs.copy()
+            if dones.any() and 'final_obs' in infos:
+                final_obs_mask = infos.get('_final_obs',
+                                           np.zeros(num_envs, dtype=bool))
+                for i in np.where(final_obs_mask)[0]:
+                    if infos['final_obs'][i] is not None:
+                        buffer_next_obs[i] = infos['final_obs'][i]
+
+            # 4. Compute shaped rewards in main process
+            rewards = np.array(
+                [reward_fn(buffer_next_obs[i]) for i in range(num_envs)],
+                dtype=np.float32)
+
+            # Terminal bonus
+            if self._terminal_bonus != 0:
+                rewards[terms] += self._terminal_bonus
+
+            # 5. Store in buffer (batch, no episode tracking)
+            self.buffer.add_batch(
+                obs_batch, actions.astype(np.int64),
+                rewards, buffer_next_obs,
+                dones.astype(np.float32))
+
+            # 6. Update counters
+            prev_steps = self.total_steps
+            self.total_steps += num_envs
+            ep_rewards += rewards
+            ep_steps += 1
+
+            # 7. Training updates
+            if self.buffer.size >= self.batch_size:
+                for _ in range(updates_per_step):
+                    if self._use_per:
+                        beta = self._get_per_beta()
+                        batch, per_indices, is_weights = \
+                            self.buffer.sample_prioritized(
+                                self.batch_size, beta, self.device)
+                        is_weights_t = torch.as_tensor(
+                            is_weights, dtype=torch.float32,
+                            device=self.device)
+                        sf_loss, td_norms = self._update_sf_per(
+                            batch, is_weights_t)
+                        self.buffer.update_priorities(
+                            per_indices, td_norms.cpu().numpy())
+                        rw_loss = self._update_reward_weights(batch)
+                    else:
+                        batch = self.buffer.sample_uniform(
+                            self.batch_size, self.device)
+                        sf_loss = self._update_sf(batch)
+                        rw_loss = self._update_reward_weights(batch)
+
+                    self.training_log['sf_loss'].append(sf_loss)
+                    self.training_log['reward_loss'].append(rw_loss)
+
+                    # LR schedulers
+                    if self._sf_scheduler is not None:
+                        self._sf_scheduler.step()
+                    if self._rw_scheduler is not None:
+                        self._rw_scheduler.step()
+
+            # 8. Target network update (crossing-based)
+            if (prev_steps // self.target_update_freq
+                    != self.total_steps // self.target_update_freq):
+                soft_update(self.sf_target, self.sf_net, self.tau)
+
+            # 9. Epsilon decay
+            self._decay_epsilon()
+
+            # 10. Handle completed episodes
+            for i in np.where(dones)[0]:
+                episodes_completed += 1
+
+                # Log episode metrics
+                self.training_log['episode_reward'].append(
+                    float(ep_rewards[i]))
+                self.training_log['episode_steps'].append(
+                    int(ep_steps[i]))
+                self.training_log['epsilon'].append(self.epsilon)
+
+                if hasattr(self, '_sf_optimizer'):
+                    self.training_log.setdefault('sf_lr', []).append(
+                        self._sf_optimizer.param_groups[0]['lr'])
+                if hasattr(self, '_rw_optimizer'):
+                    self.training_log.setdefault('rw_lr', []).append(
+                        self._rw_optimizer.param_groups[0]['lr'])
+
+                # Q-value diagnostics from this env's terminal obs
+                with torch.no_grad():
+                    obs_t = torch.as_tensor(
+                        buffer_next_obs[i], dtype=torch.float32,
+                        device=self.device).unsqueeze(0)
+                    q_vals = (self.sf_net(obs_t) * self.w).sum(dim=-1)
+                    q_np = q_vals.cpu().numpy().flatten()
+                    self.training_log.setdefault('q_mean', []).append(
+                        float(q_np.mean()))
+                    self.training_log.setdefault('q_std', []).append(
+                        float(q_np.std()))
+                    self.training_log.setdefault('q_max', []).append(
+                        float(q_np.max()))
+
+                # Reset per-env accumulators
+                ep_rewards[i] = 0.0
+                ep_steps[i] = 0
+
+                # Console logging
+                if episodes_completed % log_interval == 0:
+                    avg_reward = np.mean(
+                        self.training_log['episode_reward'][-100:])
+                    avg_sf_loss = np.mean(
+                        self.training_log['sf_loss'][-100:]
+                    ) if self.training_log['sf_loss'] else 0.0
+                    print(
+                        f"  Episode {episodes_completed}/{num_episodes} | "
+                        f"Avg reward: {avg_reward:.2f} | "
+                        f"SF loss: {avg_sf_loss:.4f} | "
+                        f"ε: {self.epsilon:.3f} | "
+                        f"Buffer: {self.buffer.size}")
+
+            # 11. Advance observations (auto-reset already applied by
+            #     SAME_STEP mode for done envs)
+            obs_batch = next_obs
+
+        print(f"Learning complete. Total steps: {self.total_steps}")
+
     def _update_sf(self, batch: Dict[str, torch.Tensor]) -> float:
         """Single successor feature update step.
 
@@ -725,6 +896,44 @@ class NeuralSRAgent:
             all_sf = self.sf_net(obs_t)  # (1, n_actions, sf_dim)
             q_values = (all_sf * self.w).sum(dim=-1)  # (1, n_actions)
             return q_values.argmax(dim=1).item()
+
+    def select_actions_batch(self, obs_batch: np.ndarray,
+                             greedy: bool = False) -> np.ndarray:
+        """Select actions for N observations using ε-greedy.
+
+        Args:
+            obs_batch: Observations, shape (N, obs_dim).
+            greedy: If True, always pick the best actions.
+
+        Returns:
+            Action indices, shape (N,).
+        """
+        n = obs_batch.shape[0]
+
+        if greedy:
+            explore_mask = np.zeros(n, dtype=bool)
+        else:
+            explore_mask = np.random.rand(n) < self.epsilon
+
+        actions = np.zeros(n, dtype=np.int64)
+
+        # Random actions for exploring envs
+        if explore_mask.any():
+            actions[explore_mask] = np.random.randint(
+                0, self.n_actions, size=explore_mask.sum())
+
+        # Greedy actions for exploiting envs
+        exploit_mask = ~explore_mask
+        if exploit_mask.any():
+            with torch.no_grad():
+                obs_t = torch.as_tensor(
+                    obs_batch[exploit_mask], dtype=torch.float32,
+                    device=self.device)
+                all_sf = self.sf_net(obs_t)  # (K, n_actions, sf_dim)
+                q_values = (all_sf * self.w).sum(dim=-1)  # (K, n_actions)
+                actions[exploit_mask] = q_values.argmax(dim=1).cpu().numpy()
+
+        return actions
 
     # ==================== Episode Execution ====================
 
