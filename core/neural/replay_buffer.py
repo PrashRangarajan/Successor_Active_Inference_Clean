@@ -185,60 +185,6 @@ class ReplayBuffer:
             priority = self._max_priority ** self._per_alpha
             self._sum_tree.update(idx, priority)
 
-    def add_batch(self, obs_batch: np.ndarray, actions: np.ndarray,
-                  rewards: np.ndarray, next_obs_batch: np.ndarray,
-                  dones: np.ndarray):
-        """Add N transitions at once, bypassing episode accumulators.
-
-        Used by vectorized training where episodes from multiple environments
-        are interleaved and episode-level tracking (HER, episodic replay) is
-        not needed.
-
-        Args:
-            obs_batch: Observations, shape (N, obs_dim).
-            actions: Actions, shape (N,).
-            rewards: Rewards, shape (N,).
-            next_obs_batch: Next observations, shape (N, obs_dim).
-            dones: Done flags, shape (N,).
-        """
-        n = len(obs_batch)
-
-        if self._ptr + n <= self.capacity:
-            # Common case: contiguous write, no wrap-around
-            sl = slice(self._ptr, self._ptr + n)
-            self.obs[sl] = obs_batch
-            self.actions[sl] = actions
-            self.rewards[sl] = rewards
-            self.next_obs[sl] = next_obs_batch
-            self.dones[sl] = dones
-            indices = range(self._ptr, self._ptr + n)
-        else:
-            # Wrap around the circular buffer
-            first = self.capacity - self._ptr
-            # Part 1: fill to end
-            self.obs[self._ptr:] = obs_batch[:first]
-            self.actions[self._ptr:] = actions[:first]
-            self.rewards[self._ptr:] = rewards[:first]
-            self.next_obs[self._ptr:] = next_obs_batch[:first]
-            self.dones[self._ptr:] = dones[:first]
-            # Part 2: wrap to start
-            remainder = n - first
-            self.obs[:remainder] = obs_batch[first:]
-            self.actions[:remainder] = actions[first:]
-            self.rewards[:remainder] = rewards[first:]
-            self.next_obs[:remainder] = next_obs_batch[first:]
-            self.dones[:remainder] = dones[first:]
-            indices = list(range(self._ptr, self.capacity)) + list(range(remainder))
-
-        # PER: assign max priority to all new transitions
-        if self._use_per:
-            priority = self._max_priority ** self._per_alpha
-            for idx in indices:
-                self._sum_tree.update(int(idx), priority)
-
-        self._ptr = (self._ptr + n) % self.capacity
-        self.size = min(self.size + n, self.capacity)
-
     def end_episode(self):
         """Mark the end of the current episode for episodic sampling.
 

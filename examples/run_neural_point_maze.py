@@ -121,9 +121,6 @@ def main():
                         help="Don't freeze SF in Phase 3 (joint fine-tuning)")
     parser.add_argument("--no-staging", action="store_true",
                         help="Disable staged learning entirely")
-    parser.add_argument("--vec-envs", type=int, default=0,
-                        help="Number of parallel envs for Phase 1 "
-                             "(0=disabled, 4-16 recommended)")
     args = parser.parse_args()
 
     cfg = NEURAL_POINTMAZE
@@ -250,42 +247,14 @@ def main():
 
         # ---- Phase 1: Diverse exploration — build SF representation ----
         if resume < 1:
-            if args.vec_envs > 0:
-                from environments.point_maze.wrappers import make_vec_env
-                print(f"Phase 1: Diverse exploration ({ep1} episodes, "
-                      f"100% diverse, {args.vec_envs} parallel envs)")
-                vec_env = make_vec_env(
-                    num_envs=args.vec_envs,
-                    maze_id=cfg["maze_id"],
-                    max_episode_steps=cfg["steps_per_episode"],
-                    wall_set=base_adapter._wall_set,
-                    x_range=base_adapter._x_range,
-                    y_range=base_adapter._y_range,
-                    x_bin_edges=base_adapter.x_space,
-                    y_bin_edges=base_adapter.y_space,
-                    n_x_bins=cfg["n_x_bins"],
-                    n_y_bins=cfg["n_y_bins"],
-                )
-                try:
-                    agent.learn_phase1_vectorized(
-                        num_episodes=ep1,
-                        steps_per_episode=cfg["steps_per_episode"],
-                        num_envs=args.vec_envs,
-                        reward_fn=reward_fn,
-                        vec_env=vec_env,
-                        log_interval=max(1, ep1 // 5),
-                    )
-                finally:
-                    vec_env.close()
-            else:
-                print(f"Phase 1: Diverse exploration ({ep1} episodes, "
-                      f"100% diverse)")
-                agent.learn_environment(
-                    num_episodes=ep1,
-                    steps_per_episode=cfg["steps_per_episode"],
-                    diverse_start=True,
-                    log_interval=max(1, ep1 // 5),
-                )
+            print(f"Phase 1: Diverse exploration ({ep1} episodes, "
+                  f"100% diverse)")
+            agent.learn_environment(
+                num_episodes=ep1,
+                steps_per_episode=cfg["steps_per_episode"],
+                diverse_start=True,
+                log_interval=max(1, ep1 // 5),
+            )
             agent.save(os.path.join(args.save_dir, "checkpoint_phase1.pt"))
 
         # ---- Phase 2: SF consolidation (staged learning) ----
