@@ -285,7 +285,9 @@ class NeuralSRAgent:
                           steps_per_episode: int = 200,
                           diverse_start: bool = True,
                           diverse_fraction: float = 1.0,
-                          log_interval: int = 100):
+                          log_interval: int = 100,
+                          checkpoint_dir: str | None = None,
+                          checkpoint_interval: int = 1000):
         """Learn successor features by exploring the environment.
 
         For each step:
@@ -302,6 +304,8 @@ class NeuralSRAgent:
                 (rest use default start). Only applies when diverse_start=True.
                 Set to 1.0 for all-diverse, 0.5 for half-and-half, etc.
             log_interval: Episodes between log prints.
+            checkpoint_dir: If set, save periodic checkpoints to this directory.
+            checkpoint_interval: Episodes between periodic checkpoints.
         """
         print(f"Learning with Neural SF ({num_episodes} episodes, "
               f"sf_dim={self.sf_dim}, ε: {self.epsilon:.3f}→{self._epsilon_end})...")
@@ -436,6 +440,14 @@ class NeuralSRAgent:
                       f"SF loss: {avg_sf_loss:.4f} | "
                       f"ε: {self.epsilon:.3f} | "
                       f"Buffer: {self.buffer.size}")
+
+            # Periodic checkpoint
+            if (checkpoint_dir is not None
+                    and (episode + 1) % checkpoint_interval == 0):
+                ckpt_path = os.path.join(
+                    checkpoint_dir, f"checkpoint_ep{episode + 1}.pt")
+                self.save(ckpt_path)
+                print(f"  Saved periodic checkpoint: {ckpt_path}")
 
         print(f"Learning complete. Total steps: {self.total_steps}")
 

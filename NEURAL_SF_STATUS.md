@@ -1,7 +1,7 @@
 # Neural Successor Feature Experiments — Status & Context
 
 > **Read this first** when continuing work on the neural SF agent experiments.
-> Last updated: 2026-03-09
+> Last updated: 2026-03-10
 
 ## Project Overview
 
@@ -64,20 +64,22 @@ Originally 3-phase staged learning, but experiments show **Phase 1 alone is suff
 | Original | Staged + SF frozen Phase 3 | 2/10 (20%) | SF frozen → w can't adapt |
 | Exp A | Staged + joint fine-tune Phase 3 | 3/10 (30%) | Best reward curve (-15) |
 | Exp B | No staging (simple 2-phase) | 3/10 (30%) | Worst rewards (-142) |
-| **Exp C** | **4000 ep Phase 1, staged** | **5/10 (50%)** | **Best so far** |
+| Exp C | 4000 ep Phase 1, staged | 5/10 (50%) | Previous best |
 | Exp C P1 only | Just Phase 1 checkpoint evaluated | 5/10 (50%) | Phase 2/3 add nothing |
-| Exp D | Exp C config, skip Phase 2 | Pending results | Still running |
+| Exp D (P1) | Phase 1 only (same cfg as Exp C) | 2/10 (20%) | Only lucky spawns (1-step) |
 | Exp E | Exp C + 4000 more Phase 1 at ε=0.05 | 1/10 (10%) | Overfitting — low ε hurts |
-| **Exp F** | **ε floor 0.20, 8 vec envs, Phase 1 only** | **Running** | Testing higher exploration |
+| **Exp F** | **ε floor 0.20, Phase 1 only** | **6/10 (60%)** | **New best**, avg 144 steps (success) |
+| Exp G | ε=1.0 (pure random), Phase 1 only | 3/10 (30%) | Pure random hurts — no TD coherence |
 
 **Checkpoints**: `data/neural_point_maze/`, `data/neural_point_maze_exp_{a,b,c,d,e,f}/`
 
 ### Key Findings
 
-1. **More high-ε exploration helps** — Exp C's 4000 eps with ε decaying 1.0→0.05 got 50%
+1. **Exploration has a sweet spot around ε=0.20** — ε=0.05→50%, ε=0.20→60%, ε=1.0→30%
 2. **More low-ε episodes hurts** — Exp E's additional 4000 eps at ε=0.05 dropped to 10%
 3. **Phases 2 and 3 don't improve success rate** — Phase 1 alone = 50%, full pipeline = 50%
 4. **Q-value gradient improved in Exp C** — wider range (-17.6 to +6.6 vs ~-6 to +3), more differentiation in bottom corridor, but still flat near U-bend entrance
+5. **Exp D underperformed Exp C** despite same config — 2/10 vs 5/10, high variance between runs
 
 ### Diagnosed Problem (via Q-value visualization)
 
@@ -90,19 +92,13 @@ See `figures/neural_point_maze/qvalue_comparison.png`:
 
 ### Currently Running
 
-**Experiment D** — Phase 1 + Phase 3 (no Phase 2), same config as Exp C otherwise.
-- GPU 0, PID 145925
-- Phase 1 done, in Phase 3
-
-**Experiment F** — Higher epsilon floor (ε: 1.0→0.20), Phase 1 only, 8 vectorized envs.
-- GPU 1, PID 187664
-- Hypothesis: persistent 20% exploration keeps diverse transitions flowing
+Nothing — GPUs occupied by another user (danmuir).
 
 ### Next Steps
 
-1. **Evaluate Exp D and F** when they finish
-2. If higher ε floor helps: try even higher (0.30) or longer training
-3. **Increase sf_dim** (256 or 512) for more expressive SF features
+1. **Try ε=0.30 or ε=0.15** — bracket around the ε=0.20 sweet spot
+2. **Multiple seeds at ε=0.20** — Exp D vs Exp C showed high variance (20% vs 50% with same config), need 3-5 seeds to get reliable numbers
+3. **Increase sf_dim** (256 or 512) — more expressive SF features for the U-bend
 4. If all else fails: nonlinear Q head Q(s,a) = f(φ(s,a)) instead of φᵀw
 
 ### Key Hyperparameters (configs.py → NEURAL_POINTMAZE)

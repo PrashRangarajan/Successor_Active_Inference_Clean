@@ -123,7 +123,17 @@ def main():
                         help="Disable staged learning entirely")
     args = parser.parse_args()
 
-    cfg = NEURAL_POINTMAZE
+    cfg = dict(NEURAL_POINTMAZE)  # mutable copy
+
+    # If eval-only, read sf_dim from checkpoint so the agent is built correctly
+    if args.eval_only:
+        import torch as _torch
+        ckpt_path = args.checkpoint or os.path.join(args.save_dir, "checkpoint.pt")
+        if os.path.exists(ckpt_path):
+            ckpt_cfg = _torch.load(ckpt_path, map_location="cpu",
+                                   weights_only=False).get("config", {})
+            if "sf_dim" in ckpt_cfg:
+                cfg["sf_dim"] = ckpt_cfg["sf_dim"]
 
     # ==================== Setup ====================
     print("=" * 60)
@@ -254,6 +264,8 @@ def main():
                 steps_per_episode=cfg["steps_per_episode"],
                 diverse_start=True,
                 log_interval=max(1, ep1 // 5),
+                checkpoint_dir=args.save_dir,
+                checkpoint_interval=max(1, ep1 // 4),
             )
             agent.save(os.path.join(args.save_dir, "checkpoint_phase1.pt"))
 
@@ -274,6 +286,8 @@ def main():
                 steps_per_episode=cfg["steps_per_episode"],
                 diverse_start=True,
                 log_interval=max(1, consolidation_eps // 5),
+                checkpoint_dir=args.save_dir,
+                checkpoint_interval=max(1, consolidation_eps // 4),
             )
 
             # Restore settings
@@ -315,6 +329,8 @@ def main():
                 diverse_start=True,
                 diverse_fraction=frac2,
                 log_interval=max(1, ep2 // 5),
+                checkpoint_dir=args.save_dir,
+                checkpoint_interval=max(1, ep2 // 4),
             )
 
             if freeze_sf:
