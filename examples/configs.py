@@ -285,6 +285,7 @@ POINTMAZE_LARGE = {
     # Eval-specific (override UMaze — Large needs the most training)
     "eval_episodes": [250, 500, 1000, 2000, 3000, 4000, 5000, 7000, 10000],
     "eval_quick_episodes": [500, 2000, 5000, 10000],
+    "eval_single_goal_idx": 3,  # Bot-right — far from top-left start
 }
 
 # =====================================================================

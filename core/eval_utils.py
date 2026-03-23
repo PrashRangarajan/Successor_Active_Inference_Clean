@@ -146,6 +146,54 @@ def plot_stability_bars(data_dict, save_path):
     print(f"  Saved {save_path}")
 
 
+def plot_success_and_steps(eps_range, success_dict, steps_dict, save_path):
+    """Plot success rate and steps-to-goal as a two-panel figure.
+
+    Top panel: success rate (0–1) with confidence bands.
+    Bottom panel: steps to goal with confidence bands.
+
+    Args:
+        eps_range: List/array of training episode counts (x-axis).
+        success_dict: OrderedDict of {label: (n_runs, n_trials) success array}.
+        steps_dict: OrderedDict of {label: (n_runs, n_trials) steps array}.
+        save_path: Full path to save the figure.
+    """
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 14), sharex=True)
+
+    # Top panel: success rate
+    for label, data in success_dict.items():
+        arr = data[:, :len(eps_range)]
+        mean = np.mean(arr, axis=0)
+        sem = np.std(arr, axis=0) / np.sqrt(len(arr))
+        color = AGENT_COLORS.get(label, None)
+        ax1.plot(eps_range, mean, 'o-', label=label, color=color, markersize=8)
+        ax1.fill_between(eps_range, mean - sem, mean + sem, alpha=0.3, color=color)
+    ax1.set_ylabel("Success Rate", fontsize=28)
+    ax1.set_ylim(-0.05, 1.05)
+    ax1.legend(fontsize=26)
+    ax1.tick_params(axis='both', labelsize=26)
+
+    # Bottom panel: steps to goal
+    for label, data in steps_dict.items():
+        arr = data[:, :len(eps_range)]
+        mean = np.mean(arr, axis=0)
+        sem = np.std(arr, axis=0) / np.sqrt(len(arr))
+        color = AGENT_COLORS.get(label, None)
+        ax2.plot(eps_range, mean, 'o-', label=label, color=color, markersize=8)
+        ax2.fill_between(eps_range, mean - sem, mean + sem, alpha=0.3, color=color)
+    ax2.set_xlabel("Number of Training Episodes", fontsize=28)
+    ax2.set_ylabel("Steps to Goal", fontsize=28)
+    ax2.legend(fontsize=26)
+    ax2.tick_params(axis='both', labelsize=26)
+
+    plt.tight_layout()
+    plt.savefig(save_path, format="png")
+    plt.close()
+    print(f"  Saved {save_path}")
+
+
 def plot_planning_steps_bars(data_dict, save_path, ylabel="Planning Steps"):
     """Plot a bar chart comparing planning steps across agents.
 

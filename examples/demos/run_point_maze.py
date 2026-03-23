@@ -154,7 +154,7 @@ def run_point_maze_example():
     # even though adapter._desired_goal may have changed during later resets.
     adapter.plot_clusters_on_maze(
         agent, save_path="figures/demos/pointmaze/maze_clusters.png",
-        goal_xy=goal,
+        start_xy=test_start, goal_xy=goal,
     )
 
     agent.plot_macro_action_heatmap(
@@ -207,6 +207,21 @@ def run_point_maze_example():
         agent.plot_trajectory_with_actions(
             x_positions, y_positions, actions,
             save_path="figures/demos/pointmaze/trajectory_actions.png",
+        )
+        # Trajectory overlaid on cluster map (with maze walls for context)
+        adapter.plot_trajectory_on_maze(
+            agent, x_positions, y_positions,
+            save_path="figures/demos/pointmaze/trajectory_on_maze_state.png",
+            color_by='macro_state',
+            start_xy=[x_positions[0], y_positions[0]],
+            goal_xy=adapter._desired_goal,
+        )
+        adapter.plot_trajectory_on_maze(
+            agent, x_positions, y_positions,
+            save_path="figures/demos/pointmaze/trajectory_on_maze_action.png",
+            color_by='macro_action',
+            start_xy=[x_positions[0], y_positions[0]],
+            goal_xy=adapter._desired_goal,
         )
 
         if frames and len(frames) > 1:

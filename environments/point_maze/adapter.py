@@ -512,24 +512,23 @@ class PointMazeAdapter(BinnedContinuousAdapter):
 
     def plot_clusters_on_maze(self, agent, save_path: str,
                               show_arrows: bool = True,
-                              show_goal: bool = True,
-                              goal_xy=None,
-                              start_xy=None):
+                              start_xy=None,
+                              goal_xy=None):
         """Visualize macro-state clusters overlaid on the physical maze.
 
         Creates a figure with:
         - Dark rectangles for wall cells
         - Colored tiles (one per navigable bin) showing cluster assignment
         - Macro-action arrows between cluster centroids
-        - Start and goal location markers
+        - Sequential cluster labels with (S)/(G) for start/goal clusters
 
         Args:
             agent: ``HierarchicalSRAgent`` (for cluster data).
             save_path: Where to save the figure.
             show_arrows: Draw macro-action arrows between clusters.
-            show_goal: Mark the goal location.
-            goal_xy: Explicit goal coordinates (overrides adapter cache).
-            start_xy: Start coordinates to show (green circle marker).
+            start_xy: Start coordinates; the containing cluster is labelled (S).
+            goal_xy: Goal coordinates (falls back to adapter cache);
+                     the containing cluster is labelled (G).
         """
         import os
         import matplotlib.pyplot as plt
@@ -543,9 +542,58 @@ class PointMazeAdapter(BinnedContinuousAdapter):
         dx = x_edges[1] - x_edges[0]
         dy = y_edges[1] - y_edges[0]
 
-        # Cluster colors (tab10)
+        # ── Identify start / goal macro-states (old ids) ──
+        _goal = goal_xy if goal_xy is not None else self._desired_goal
+        all_old_ids = sorted(set(agent.micro_to_macro.values()))
+
+        start_old = None
+        if start_xy is not None:
+            ij = self.discretize_obs(np.array(start_xy))
+            start_flat = self.state_space.state_to_index(ij)
+            if start_flat in agent.micro_to_macro:
+                start_old = agent.micro_to_macro[start_flat]
+
+        goal_old = None
+        if _goal is not None:
+            ij = self.discretize_obs(np.array(_goal))
+            goal_flat = self.state_space.state_to_index(ij)
+            if goal_flat in agent.micro_to_macro:
+                goal_old = agent.micro_to_macro[goal_flat]
+
+        # ── Build path-ordered remapping: 0 (S) → 1 → … → N (G) ──
+        # Follow the macro-action policy from start to goal to get the
+        # traversal order, then append any clusters not on the path.
+        path_order = []
+        if (start_old is not None and show_arrows
+                and hasattr(agent, 'adj_list') and agent.adj_list):
+            goal_macros_old = set()
+            for gs in agent.goal_states:
+                if gs in agent.micro_to_macro:
+                    goal_macros_old.add(agent.micro_to_macro[gs])
+
+            V_macro = agent.M_macro @ agent.C_macro
+            cur = start_old
+            visited = set()
+            while cur is not None and cur not in visited:
+                path_order.append(cur)
+                visited.add(cur)
+                if cur in goal_macros_old:
+                    break
+                if cur not in agent.adj_list or not agent.adj_list[cur]:
+                    break
+                adj = agent.adj_list[cur]
+                values = [V_macro[a] for a in adj]
+                cur = adj[int(np.argmax(values))]
+        # Append any clusters not reached by the path walk
+        for c in all_old_ids:
+            if c not in path_order:
+                path_order.append(c)
+
+        remap = {old: new for new, old in enumerate(path_order)}
+
+        # Cluster colors (tab10) keyed by *new* sequential id
         tab = plt.get_cmap("tab10")
-        cluster_colors = [tab(i) for i in range(agent.n_clusters)]
+        cluster_colors = {new: tab(new) for new in range(len(all_old_ids))}
 
         fig, ax = plt.subplots(figsize=(8, 8))
 
@@ -554,15 +602,159 @@ class PointMazeAdapter(BinnedContinuousAdapter):
             xi, yi = self.state_space.index_to_state(micro_idx)
             rect = mpatches.Rectangle(
                 (x_edges[xi], y_edges[yi]), dx, dy,
-                facecolor=cluster_colors[macro_idx], edgecolor='white',
-                linewidth=0.3, alpha=0.85, zorder=3,
+                facecolor=cluster_colors[remap[macro_idx]],
+                edgecolor='white', linewidth=0.3, alpha=0.85, zorder=3,
             )
             ax.add_patch(rect)
 
         # Draw walls on top
         self.draw_maze_walls(ax)
 
-        # Compute cluster centroids (used by arrows and markers)
+        # Map start/goal to new ids
+        start_macro = remap[start_old] if start_old is not None else None
+        goal_macro = remap[goal_old] if goal_old is not None else None
+
+        # ── Compute cluster centroids (using new ids) ──
+        centroids = {}
+        for old_c in range(agent.n_clusters):
+            members = agent.macro_state_list[old_c]
+            if not members:
+                continue
+            coords = np.array([
+                self.state_space.index_to_state(s) for s in members
+            ])
+            cx = np.mean(x_centers[coords[:, 0]])
+            cy = np.mean(y_centers[coords[:, 1]])
+            centroids[remap[old_c]] = (cx, cy)
+
+        # ── Macro-action arrows ──
+        if show_arrows and hasattr(agent, 'adj_list') and agent.adj_list:
+            # Goal macro states (old ids)
+            goal_macros_old = set()
+            for gs in agent.goal_states:
+                if gs in agent.micro_to_macro:
+                    goal_macros_old.add(agent.micro_to_macro[gs])
+
+            V_macro = agent.M_macro @ agent.C_macro
+            for old_c in range(agent.n_clusters):
+                new_c = remap.get(old_c)
+                if new_c is None or new_c not in centroids:
+                    continue
+                if old_c in goal_macros_old:
+                    continue
+                if old_c not in agent.adj_list or not agent.adj_list[old_c]:
+                    continue
+                adj = agent.adj_list[old_c]
+                values = [V_macro[a] for a in adj]
+                target_old = adj[int(np.argmax(values))]
+                target_new = remap.get(target_old)
+                if target_new is None or target_new == new_c:
+                    continue
+                if target_new not in centroids:
+                    continue
+                x0, y0 = centroids[new_c]
+                x1, y1 = centroids[target_new]
+                ax.annotate(
+                    '', xy=(x1, y1), xytext=(x0, y0),
+                    arrowprops=dict(
+                        arrowstyle='->', lw=2.5, color='black',
+                        shrinkA=10, shrinkB=10,
+                    ),
+                    zorder=12,
+                )
+
+        # ── Cluster labels with (S)/(G) suffix for start / goal ──
+        for new_c, (cx, cy) in centroids.items():
+            label = str(new_c)
+            if new_c == start_macro:
+                label += " (S)"
+            elif new_c == goal_macro:
+                label += " (G)"
+            ax.text(
+                cx, cy, label, fontsize=13, fontweight='bold',
+                ha='center', va='center', color='white',
+                path_effects=[
+                    PathEffects.withStroke(linewidth=3, foreground='black')
+                ],
+                zorder=13,
+            )
+
+        ax.set_xlim(self._x_range)
+        ax.set_ylim(self._y_range)
+        ax.set_aspect('equal')
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        fig.savefig(save_path, bbox_inches='tight', dpi=150, pad_inches=0.02)
+        plt.close(fig)
+        print(f"  Saved maze cluster plot to {save_path}")
+
+    def plot_trajectory_on_maze(self, agent, x_positions, y_positions,
+                                save_path: str, color_by: str = 'macro_state',
+                                macro_action_targets=None,
+                                start_xy=None, goal_xy=None):
+        """Overlay a trajectory on the cluster map with maze walls.
+
+        Combines the cluster-colored maze background from
+        ``plot_clusters_on_maze`` with a trajectory colored by macro state
+        or macro action.
+
+        Args:
+            agent: Trained ``HierarchicalSRAgent``.
+            x_positions: List of x coordinates per step.
+            y_positions: List of y coordinates per step.
+            save_path: Where to save the figure.
+            color_by: ``'macro_state'`` or ``'macro_action'``.
+            macro_action_targets: Optional per-step macro action targets
+                (used when ``color_by='macro_action'``).
+            start_xy: Start position (for cluster labelling).
+            goal_xy: Goal position (for cluster labelling).
+        """
+        import os
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as mpatches
+        import matplotlib.patheffects as PathEffects
+
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+        x_edges, y_edges = self.get_bin_edges()
+        x_centers, y_centers = self.get_bin_centers()
+        dx = x_edges[1] - x_edges[0]
+        dy = y_edges[1] - y_edges[0]
+
+        tab = plt.get_cmap("tab10")
+        cluster_colors = [tab(i) for i in range(agent.n_clusters)]
+
+        fig, ax = plt.subplots(figsize=(8, 8))
+
+        # ── Cluster-colored bins as faded backdrop ──
+        for micro_idx, macro_idx in agent.micro_to_macro.items():
+            xi, yi = self.state_space.index_to_state(micro_idx)
+            rect = mpatches.Rectangle(
+                (x_edges[xi], y_edges[yi]), dx, dy,
+                facecolor=cluster_colors[macro_idx], edgecolor='white',
+                linewidth=0.3, alpha=0.35, zorder=3,
+            )
+            ax.add_patch(rect)
+
+        # ── Maze walls ──
+        self.draw_maze_walls(ax)
+
+        # ── Cluster labels ──
+        _goal = goal_xy if goal_xy is not None else self._desired_goal
+        start_macro = None
+        if start_xy is not None:
+            ij = self.discretize_obs(np.array(start_xy))
+            s_flat = self.state_space.state_to_index(ij)
+            if s_flat in agent.micro_to_macro:
+                start_macro = agent.micro_to_macro[s_flat]
+        goal_macro = None
+        if _goal is not None:
+            ij = self.discretize_obs(np.array(_goal))
+            g_flat = self.state_space.state_to_index(ij)
+            if g_flat in agent.micro_to_macro:
+                goal_macro = agent.micro_to_macro[g_flat]
+
         centroids = {}
         for c in range(agent.n_clusters):
             members = agent.macro_state_list[c]
@@ -575,86 +767,71 @@ class PointMazeAdapter(BinnedContinuousAdapter):
             cy = np.mean(y_centers[coords[:, 1]])
             centroids[c] = (cx, cy)
 
-        # Macro-action arrows
-        if show_arrows and hasattr(agent, 'adj_list') and agent.adj_list:
-            # Goal macro states
-            goal_macros = set()
-            for gs in agent.goal_states:
-                if gs in agent.micro_to_macro:
-                    goal_macros.add(agent.micro_to_macro[gs])
+        for c, (cx, cy) in centroids.items():
+            label = str(c)
+            if c == start_macro:
+                label += " (S)"
+            elif c == goal_macro:
+                label += " (G)"
+            ax.text(
+                cx, cy, label, fontsize=13, fontweight='bold',
+                ha='center', va='center', color='white',
+                path_effects=[
+                    PathEffects.withStroke(linewidth=3, foreground='black')
+                ],
+                zorder=8,
+            )
 
-            V_macro = agent.M_macro @ agent.C_macro
-            for c in range(agent.n_clusters):
-                if c not in centroids or c in goal_macros:
-                    continue
-                if c not in agent.adj_list or not agent.adj_list[c]:
-                    continue
-                adj = agent.adj_list[c]
-                values = [V_macro[a] for a in adj]
-                target = adj[int(np.argmax(values))]
-                if target == c or target not in centroids:
-                    continue
-                x0, y0 = centroids[c]
-                x1, y1 = centroids[target]
-                ax.annotate(
-                    '', xy=(x1, y1), xytext=(x0, y0),
-                    arrowprops=dict(
-                        arrowstyle='->', lw=2.5, color='black',
-                        shrinkA=10, shrinkB=10,
-                    ),
-                    zorder=12,
-                )
+        # ── Trajectory connecting line ──
+        ax.plot(x_positions, y_positions,
+                linewidth=1.5, color='gray', alpha=0.5, zorder=9)
 
-            # Cluster labels at centroids
-            for c, (cx, cy) in centroids.items():
-                label = f'{c}' + (' *' if c in goal_macros else '')
-                ax.text(
-                    cx, cy, label, fontsize=13, fontweight='bold',
-                    ha='center', va='center', color='white',
-                    path_effects=[
-                        PathEffects.withStroke(linewidth=3, foreground='black')
-                    ],
-                    zorder=13,
-                )
+        # ── Trajectory points colored by macro state / action ──
+        goal_color = (1.0, 0.84, 0.0, 1.0)  # gold
+        num_points = len(x_positions)
+        for i in range(num_points):
+            obs = np.array([x_positions[i], y_positions[i]])
+            discrete = self.discretize_obs(obs)
+            s_idx = self.state_space.state_to_index(discrete)
 
-        # Helper: check if a marker position clashes with any centroid
-        def _needs_offset(marker_xy, centroids_dict, threshold=0.4):
-            for _, (cx, cy) in centroids_dict.items():
-                dist = np.sqrt((marker_xy[0] - cx)**2 + (marker_xy[1] - cy)**2)
-                if dist < threshold:
-                    return True
-            return False
+            if color_by == 'macro_action':
+                if macro_action_targets is not None and i < len(macro_action_targets):
+                    target = macro_action_targets[i]
+                else:
+                    target = agent._get_macro_action_target(s_idx)
+                if target is None:
+                    c = goal_color
+                else:
+                    c = cluster_colors[target]
+            else:
+                macro = agent.micro_to_macro.get(s_idx, 0)
+                c = cluster_colors[macro]
 
-        legend_handles = []
+            ax.plot(x_positions[i], y_positions[i],
+                    marker='o', markersize=6, color=c,
+                    markeredgecolor='black', markeredgewidth=0.3, zorder=10)
 
-        # Start marker
-        if start_xy is not None:
-            sx, sy = float(start_xy[0]), float(start_xy[1])
-            if _needs_offset(start_xy, centroids):
-                sx += 0.45
-            ax.plot(sx, sy, 'o', markersize=16, color='limegreen',
-                    markeredgecolor='darkgreen', markeredgewidth=2, zorder=15)
-            legend_handles.append(
-                plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='limegreen',
-                           markeredgecolor='darkgreen', markersize=10, label='Start'))
+        # ── Start / End markers ──
+        ax.scatter(x_positions[0], y_positions[0],
+                   color='white', marker='o', s=100,
+                   edgecolor='black', linewidths=2, zorder=11, label='Start')
+        ax.scatter(x_positions[-1], y_positions[-1],
+                   color='white', marker='s', s=100,
+                   edgecolor='black', linewidths=2, zorder=11, label='End')
 
-        # Goal marker — use explicit goal_xy if provided, else fall back to
-        # adapter's cached desired_goal (which may have changed on later resets).
-        _goal = goal_xy if goal_xy is not None else self._desired_goal
-        if show_goal and _goal is not None:
-            gx, gy = float(_goal[0]), float(_goal[1])
-            if _needs_offset(_goal, centroids):
-                gx += 0.45
-            ax.plot(gx, gy, marker='*', markersize=22, color='gold',
-                    markeredgecolor='black', markeredgewidth=1.5, zorder=15)
-            legend_handles.append(
-                plt.Line2D([0], [0], marker='*', color='w', markerfacecolor='gold',
-                           markeredgecolor='black', markersize=12, label='Goal'))
+        # ── Legend ──
+        if color_by == 'macro_action':
+            ax.scatter([], [], color=goal_color, label='Goal',
+                       marker='o', s=40, edgecolor='black')
+            for i in range(agent.n_clusters):
+                ax.scatter([], [], color=cluster_colors[i], label=f'→ {i}',
+                           marker='o', s=40, edgecolor='black')
+        else:
+            for i in range(agent.n_clusters):
+                ax.scatter([], [], color=cluster_colors[i], label=f'{i}',
+                           marker='o', s=40, edgecolor='black')
 
-        if legend_handles:
-            ax.legend(handles=legend_handles, loc='upper right', fontsize=11,
-                      framealpha=0.9)
-
+        ax.legend(loc='upper right', fontsize=10, framealpha=0.9)
         ax.set_xlim(self._x_range)
         ax.set_ylim(self._y_range)
         ax.set_aspect('equal')
@@ -663,7 +840,7 @@ class PointMazeAdapter(BinnedContinuousAdapter):
 
         fig.savefig(save_path, bbox_inches='tight', dpi=150, pad_inches=0.02)
         plt.close(fig)
-        print(f"  Saved maze cluster plot to {save_path}")
+        print(f"  Saved {color_by} trajectory on maze to {save_path}")
 
     def plot_multi_goal_maze(self, agent, trajectories, goals, save_path: str):
         """Overlay multiple goal-reaching trajectories on the maze cluster map.
