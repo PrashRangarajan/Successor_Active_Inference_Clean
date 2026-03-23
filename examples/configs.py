@@ -272,14 +272,15 @@ POINTMAZE_LARGE = {
     "render_width": 640,        # 12:9 aspect ratio → 4:3
     "render_height": 480,
 
-    # Replanning: 6 goals spanning quadrants + center + mid-corridor
+    # Replanning: 6 goals zigzagging across the maze so every consecutive
+    # pair is far apart (maximizes the flat agent's failure rate).
     "replan_goals": [
-        {"cell": [1, 1], "label": "Top-left"},
-        {"cell": [1, 10], "label": "Top-right"},
-        {"cell": [7, 1], "label": "Bot-left"},
         {"cell": [7, 10], "label": "Bot-right"},
-        {"cell": [3, 5], "label": "Center"},
+        {"cell": [1, 1], "label": "Top-left"},
         {"cell": [5, 7], "label": "Mid-right"},
+        {"cell": [7, 1], "label": "Bot-left"},
+        {"cell": [1, 10], "label": "Top-right"},
+        {"cell": [3, 5], "label": "Center"},
     ],
 
     # Eval-specific (override UMaze — Large needs the most training)
