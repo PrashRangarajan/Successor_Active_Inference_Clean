@@ -263,10 +263,10 @@ POINTMAZE_MEDIUM = {
 # =====================================================================
 POINTMAZE_LARGE = {
     **POINTMAZE,
-    "n_x_bins": 36,             # 12 cols × 3 bins/cell
-    "n_y_bins": 27,             # 9 rows × 3 bins/cell
+    "n_x_bins": 48,             # 12 cols × 4 bins/cell (matches Medium resolution)
+    "n_y_bins": 36,             # 9 rows × 4 bins/cell
     "n_clusters": 12,           # Large has many rooms/corridors; 12 keeps within-cluster paths short
-    "train_episodes": 15000,    # ~414 navigable states, complex layout needs more
+    "train_episodes": 25000,    # ~736 navigable states at 4 bins/cell, needs more training
     "test_max_steps": 20000,    # Longest paths in the maze
     "maze_id": "PointMaze_Large-v3",
     "render_width": 640,        # 12:9 aspect ratio → 4:3
