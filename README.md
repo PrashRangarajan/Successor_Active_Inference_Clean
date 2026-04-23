@@ -249,11 +249,14 @@ class MyEnvironmentAdapter(BaseEnvironmentAdapter):
 If you use this code in your research, please cite:
 
 ```bibtex
-@software{hierarchical_active_inference,
-  author = {Rangarajan, Prashant},
-  title = {Hierarchical Active Inference with Successor Representations},
-  year = {2024},
-  url = {https://github.com/your-username/hierarchical-active-inference}
+@misc{rangarajan2026hierarchicalactiveinferenceusing,
+      title={Hierarchical Active Inference using Successor Representations}, 
+      author={Prashant Rangarajan and Rajesh P. N. Rao},
+      year={2026},
+      eprint={2604.15679},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2604.15679}, 
 }
 ```
 
